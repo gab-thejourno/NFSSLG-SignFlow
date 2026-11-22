@@ -19,6 +19,7 @@ import {
 import type { DocumentItem, DocumentEvent } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { apiGetDocuments, apiGetEvents, subscribeToRealtime } from '../../lib/api';
+import { isSignatoryForUser } from '../../lib/identity';
 
 interface DashboardViewProps {
   onOpenDocument: (docId: string) => void;
@@ -72,14 +73,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Calculations for stats
   // Pending Signatures: documents where current user is a signatory and their status is pending
   const pendingForMe = documents.filter((d) => {
-    const sig = d.signatories.find((s) => s.userId === user?.id);
+    const sig = d.signatories.find((s) => isSignatoryForUser(s, user));
     return sig?.status === 'pending' && d.status !== 'completed' && d.status !== 'cancelled';
   }).length;
 
   // Documents awaiting others: initiated by user or where user has signed, but not all have signed
   const awaitingOthers = documents.filter((d) => {
     const isInitiator = d.initiatorId === user?.id;
-    const mySig = d.signatories.find((s) => s.userId === user?.id);
+    const mySig = d.signatories.find((s) => isSignatoryForUser(s, user));
     const hasSigned = mySig?.status === 'signed';
     return (
       (isInitiator || hasSigned) &&
@@ -95,7 +96,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Documents requiring attention
   const urgentDocs = documents
     .filter((d) => {
-      const sig = d.signatories.find((s) => s.userId === user?.id);
+      const sig = d.signatories.find((s) => isSignatoryForUser(s, user));
       return sig?.status === 'pending' && d.status !== 'completed';
     })
     .slice(0, 3);

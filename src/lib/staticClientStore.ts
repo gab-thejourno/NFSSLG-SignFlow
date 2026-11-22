@@ -402,7 +402,11 @@ async function createBrowserSamplePdf(
   return savePdfBytes(idbKey, pdfBytes);
 }
 
-async function finalizeBrowserPdf(doc: DocumentItem, signatures: SignatureRecord[]): Promise<string> {
+async function finalizeBrowserPdf(
+  doc: DocumentItem,
+  signatures: SignatureRecord[],
+  includeCompletionCert = true
+): Promise<string> {
   let originalBytes = await loadPdfBytes(doc.originalPdfUrl);
   if (!originalBytes && doc.originalPdfUrl.startsWith('blob:')) {
     try {
@@ -512,116 +516,118 @@ async function finalizeBrowserPdf(doc: DocumentItem, signatures: SignatureRecord
     } catch {}
   }
 
-  // Append Certificate of Digital Completion
-  const certPage = pdfDoc.addPage([595.28, 841.89]);
-  const { width: cWidth, height: cHeight } = certPage.getSize();
-  certPage.drawRectangle({
-    x: 25,
-    y: 25,
-    width: cWidth - 50,
-    height: cHeight - 50,
-    borderWidth: 2,
-    borderColor: rgb(0.06, 0.16, 0.26),
-    color: rgb(0.99, 0.99, 1),
-  });
-  certPage.drawText('NATIONAL FEDERATION OF SSLG - AUDIT REGISTRY', {
-    x: 50,
-    y: cHeight - 65,
-    size: 14,
-    font: helveticaBold,
-    color: rgb(0.06, 0.16, 0.26),
-  });
-  certPage.drawText('CERTIFICATE OF DIGITAL COMPLETION', {
-    x: 50,
-    y: cHeight - 88,
-    size: 20,
-    font: helveticaBold,
-    color: rgb(0.09, 0.25, 0.45),
-  });
-  certPage.drawText(
-    'This certificate confirms that all designated signatories have formally reviewed, approved, and cryptographically signed the official document referenced below via the NFSSLG SignFlow Digital Signature Platform.',
-    {
+  // Append Certificate of Digital Completion only when all signatories are complete
+  if (includeCompletionCert) {
+    const certPage = pdfDoc.addPage([595.28, 841.89]);
+    const { width: cWidth, height: cHeight } = certPage.getSize();
+    certPage.drawRectangle({
+      x: 25,
+      y: 25,
+      width: cWidth - 50,
+      height: cHeight - 50,
+      borderWidth: 2,
+      borderColor: rgb(0.06, 0.16, 0.26),
+      color: rgb(0.99, 0.99, 1),
+    });
+    certPage.drawText('NATIONAL FEDERATION OF SSLG - AUDIT REGISTRY', {
       x: 50,
-      y: cHeight - 115,
-      size: 9.5,
-      font: helvetica,
-      color: rgb(0.3, 0.35, 0.4),
-      maxWidth: cWidth - 100,
-    }
-  );
-  certPage.drawRectangle({
-    x: 50,
-    y: cHeight - 230,
-    width: cWidth - 100,
-    height: 95,
-    color: rgb(0.95, 0.97, 0.99),
-    borderWidth: 1,
-    borderColor: rgb(0.82, 0.87, 0.92),
-  });
-  certPage.drawText(sanitizeWinAnsi(`Document Title: ${doc.title}`).slice(0, 75), {
-    x: 65,
-    y: cHeight - 158,
-    size: 10,
-    font: helveticaBold,
-    color: rgb(0.1, 0.15, 0.2),
-  });
-  certPage.drawText(sanitizeWinAnsi(`Reference Number: ${doc.referenceNumber}  |  Category: ${doc.category}`), {
-    x: 65,
-    y: cHeight - 178,
-    size: 9,
-    font: helvetica,
-    color: rgb(0.3, 0.35, 0.4),
-  });
-  certPage.drawText(sanitizeWinAnsi(`Initiator: ${doc.initiator?.fullName || 'Central Office Admin'}`), {
-    x: 65,
-    y: cHeight - 196,
-    size: 9,
-    font: helvetica,
-    color: rgb(0.3, 0.35, 0.4),
-  });
-  certPage.drawText(`Completed On: ${new Date().toUTCString()}`, {
-    x: 65,
-    y: cHeight - 214,
-    size: 9,
-    font: helveticaBold,
-    color: rgb(0.05, 0.45, 0.25),
-  });
-
-  let rowY = cHeight - 285;
-  signatures.forEach((sig, i) => {
-    if (rowY < 90) return;
+      y: cHeight - 65,
+      size: 14,
+      font: helveticaBold,
+      color: rgb(0.06, 0.16, 0.26),
+    });
+    certPage.drawText('CERTIFICATE OF DIGITAL COMPLETION', {
+      x: 50,
+      y: cHeight - 88,
+      size: 20,
+      font: helveticaBold,
+      color: rgb(0.09, 0.25, 0.45),
+    });
+    certPage.drawText(
+      'This certificate confirms that all designated signatories have formally reviewed, approved, and cryptographically signed the official document referenced below via the NFSSLG SignFlow Digital Signature Platform.',
+      {
+        x: 50,
+        y: cHeight - 115,
+        size: 9.5,
+        font: helvetica,
+        color: rgb(0.3, 0.35, 0.4),
+        maxWidth: cWidth - 100,
+      }
+    );
     certPage.drawRectangle({
       x: 50,
-      y: rowY - 12,
+      y: cHeight - 230,
       width: cWidth - 100,
-      height: 46,
-      borderWidth: 0.75,
-      borderColor: rgb(0.85, 0.88, 0.92),
-      color: rgb(1, 1, 1),
+      height: 95,
+      color: rgb(0.95, 0.97, 0.99),
+      borderWidth: 1,
+      borderColor: rgb(0.82, 0.87, 0.92),
     });
-    certPage.drawText(sanitizeWinAnsi(`${i + 1}. ${sig.userName} (${sig.userPosition})`), {
-      x: 62,
-      y: rowY + 14,
-      size: 9.5,
+    certPage.drawText(sanitizeWinAnsi(`Document Title: ${doc.title}`).slice(0, 75), {
+      x: 65,
+      y: cHeight - 158,
+      size: 10,
       font: helveticaBold,
-      color: rgb(0.08, 0.14, 0.22),
+      color: rgb(0.1, 0.15, 0.2),
     });
-    certPage.drawText(`Signed At: ${new Date(sig.signedAt).toUTCString()}`, {
-      x: 62,
-      y: rowY - 1,
-      size: 7.5,
+    certPage.drawText(sanitizeWinAnsi(`Reference Number: ${doc.referenceNumber}  |  Category: ${doc.category}`), {
+      x: 65,
+      y: cHeight - 178,
+      size: 9,
       font: helvetica,
-      color: rgb(0.4, 0.45, 0.5),
+      color: rgb(0.3, 0.35, 0.4),
     });
-    certPage.drawText(`Crypto Hash: ${sig.verificationHash.slice(0, 24)}...`, {
-      x: 320,
-      y: rowY - 1,
-      size: 7.5,
+    certPage.drawText(sanitizeWinAnsi(`Initiator: ${doc.initiator?.fullName || 'Central Office Admin'}`), {
+      x: 65,
+      y: cHeight - 196,
+      size: 9,
       font: helvetica,
-      color: rgb(0.1, 0.4, 0.7),
+      color: rgb(0.3, 0.35, 0.4),
     });
-    rowY -= 54;
-  });
+    certPage.drawText(`Completed On: ${new Date().toUTCString()}`, {
+      x: 65,
+      y: cHeight - 214,
+      size: 9,
+      font: helveticaBold,
+      color: rgb(0.05, 0.45, 0.25),
+    });
+
+    let rowY = cHeight - 285;
+    signatures.forEach((sig, i) => {
+      if (rowY < 90) return;
+      certPage.drawRectangle({
+        x: 50,
+        y: rowY - 12,
+        width: cWidth - 100,
+        height: 46,
+        borderWidth: 0.75,
+        borderColor: rgb(0.85, 0.88, 0.92),
+        color: rgb(1, 1, 1),
+      });
+      certPage.drawText(sanitizeWinAnsi(`${i + 1}. ${sig.userName} (${sig.userPosition})`), {
+        x: 62,
+        y: rowY + 14,
+        size: 9.5,
+        font: helveticaBold,
+        color: rgb(0.08, 0.14, 0.22),
+      });
+      certPage.drawText(`Signed At: ${new Date(sig.signedAt).toUTCString()}`, {
+        x: 62,
+        y: rowY - 1,
+        size: 7.5,
+        font: helvetica,
+        color: rgb(0.4, 0.45, 0.5),
+      });
+      certPage.drawText(`Crypto Hash: ${sig.verificationHash.slice(0, 24)}...`, {
+        x: 320,
+        y: rowY - 1,
+        size: 7.5,
+        font: helvetica,
+        color: rgb(0.1, 0.4, 0.7),
+      });
+      rowY -= 54;
+    });
+  }
 
   const finalBytes = await pdfDoc.save();
   const idbKey = `idb://final_${doc.id}_${Date.now()}.pdf`;
@@ -974,7 +980,9 @@ export const staticApi = {
     const scope = params?.scope;
 
     if (scope === 'assigned') {
-      docs = docs.filter((d) => d.signatories.some((s) => s.userId === user.id));
+      docs = docs.filter(
+        (d) => d.signatories.length === 0 || d.signatories.some((s) => s.userId === user.id)
+      );
     } else if (scope === 'mine') {
       docs = docs.filter((d) => d.initiatorId === user.id);
     } else if (scope === 'completed') {
@@ -1221,7 +1229,18 @@ export const staticApi = {
     const docIdx = db.documents.findIndex((d) => d.id === docId);
     if (docIdx === -1) throw new Error('Document not found');
     const doc = db.documents[docIdx];
-    const signatory = doc.signatories.find((s) => s.userId === user.id);
+    let signatory = doc.signatories.find((s) => s.userId === user.id);
+    if (!signatory && doc.signatories.length === 0) {
+      signatory = {
+        id: `signtry-${user.id}`,
+        documentId: doc.id,
+        userId: user.id,
+        user: sanitizeUser(user),
+        signingOrder: 1,
+        status: 'pending',
+      };
+      doc.signatories.push(signatory);
+    }
     if (!signatory) throw new Error('Not assigned as signatory.');
     if (signatory.status === 'signed') throw new Error('You have already signed this document.');
 
@@ -1262,13 +1281,12 @@ export const staticApi = {
       if (next) next.status = 'pending';
     }
 
-    const completed = doc.signatories.every((s) => s.status === 'signed');
+    const completed = doc.signatories.length > 0 && doc.signatories.every((s) => s.status === 'signed');
     doc.status = completed ? 'completed' : 'in_progress';
     doc.updatedAt = now;
 
-    if (completed) {
-      doc.finalPdfUrl = await finalizeBrowserPdf(doc, doc.signatures);
-    }
+    // Always merge the latest partial or final signed PDF so it can be downloaded at any stage
+    doc.finalPdfUrl = await finalizeBrowserPdf(doc, doc.signatures, completed);
 
     db.events.unshift({
       id: `evt-${Date.now()}`,
@@ -1298,6 +1316,83 @@ export const staticApi = {
     saveStaticDb(db);
     const hydrated = await hydrateDocumentUrls(doc);
     emitLocalRealtime({ type: 'FIELDS_UPDATED', payload: { documentId: docId, document: hydrated } });
+    return { document: hydrated };
+  },
+
+  async delegateSignatories(
+    docId: string,
+    targetUserIds: string[],
+    replaceCurrentUser = false
+  ): Promise<{ document: DocumentItem }> {
+    const db = loadStaticDb();
+    const currentUser = getCurrentStaticUser(db);
+    if (!currentUser) throw new Error('Unauthorized');
+    const doc = db.documents.find((d) => d.id === docId);
+    if (!doc) throw new Error('Document not found');
+
+    if (replaceCurrentUser) {
+      doc.signatories = doc.signatories.filter(
+        (s) => !(s.userId === currentUser.id && s.status !== 'signed')
+      );
+    }
+
+    const now = new Date().toISOString();
+    for (const targetId of targetUserIds) {
+      const targetUser = db.users.find((u) => u.id === targetId);
+      if (!targetUser) continue;
+      if (doc.signatories.some((s) => s.userId === targetUser.id)) continue;
+
+      const nextOrder =
+        doc.signatories.length > 0
+          ? Math.max(...doc.signatories.map((s) => s.signingOrder || 1)) + 1
+          : 1;
+      const hasPriorPending = doc.signatories.some(
+        (s) => s.status === 'pending' || s.status === 'waiting'
+      );
+
+      doc.signatories.push({
+        id: `signtry-${targetUser.id}-${Date.now()}`,
+        documentId: docId,
+        userId: targetUser.id,
+        user: sanitizeUser(targetUser),
+        signingOrder: nextOrder,
+        status:
+          doc.signingOrderType === 'sequential' && hasPriorPending ? 'waiting' : 'pending',
+      });
+
+      db.notifications.unshift({
+        id: `notif-del-${Date.now()}-${targetUser.id}`,
+        userId: targetUser.id,
+        title: 'Delegated for Your Signature',
+        message: `${currentUser.fullName} delegated "${doc.title}" for your signature.`,
+        link: `/documents/${docId}/sign`,
+        read: false,
+        createdAt: now,
+      });
+    }
+
+    const allSigned =
+      doc.signatories.length > 0 && doc.signatories.every((s) => s.status === 'signed');
+    const anySigned = doc.signatories.some((s) => s.status === 'signed');
+    doc.status = allSigned ? 'completed' : anySigned ? 'in_progress' : 'pending_signatures';
+    doc.updatedAt = now;
+
+    db.events.unshift({
+      id: `evt-del-${Date.now()}`,
+      documentId: docId,
+      documentTitle: doc.title,
+      userId: currentUser.id,
+      userName: currentUser.fullName,
+      userEmail: currentUser.email,
+      action: 'SIGNATORY_ADDED',
+      details: `${currentUser.fullName} delegated signing to ${targetUserIds.length} signatory(ies).`,
+      timestamp: now,
+      ipAddress: 'Client Browser',
+    });
+
+    saveStaticDb(db);
+    const hydrated = await hydrateDocumentUrls(doc);
+    emitLocalRealtime({ type: 'DOCUMENT_UPDATED', payload: { documentId: docId, document: hydrated } });
     return { document: hydrated };
   },
 

@@ -17,6 +17,7 @@ import {
 import type { DocumentItem } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import { apiGetDocuments, subscribeToRealtime } from '../../lib/api';
+import { isSignatoryForUser } from '../../lib/identity';
 
 interface DocumentsApprovalViewProps {
   onOpenDocument: (docId: string) => void;
@@ -136,7 +137,7 @@ export const DocumentsApprovalView: React.FC<DocumentsApprovalViewProps> = ({
       ) : (
         <div className="grid gap-4">
           {documents.map((doc) => {
-            const mySigRecord = doc.signatories.find((s) => s.userId === user?.id);
+            const mySigRecord = doc.signatories.find((s) => isSignatoryForUser(s, user));
             const isMyTurn = mySigRecord?.status === 'pending';
             const isSignedByMe = mySigRecord?.status === 'signed';
             const isWaitingSequence =
@@ -229,6 +230,31 @@ export const DocumentsApprovalView: React.FC<DocumentsApprovalViewProps> = ({
 
                   {/* Action Button Based on User Status */}
                   <div className="flex items-center space-x-2">
+                    {(doc.status === 'completed' || doc.signatures.length > 0) && (() => {
+                      const rawUrl = doc.finalPdfUrl || doc.originalPdfUrl;
+                      const dlUrl = rawUrl.startsWith('http')
+                        ? `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}v=${encodeURIComponent(doc.updatedAt || '1')}`
+                        : rawUrl;
+                      return (
+                        <a
+                          href={dlUrl}
+                          download={`${doc.referenceNumber}_Signed.pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-200 flex items-center space-x-1 transition-colors"
+                          title={
+                            doc.status === 'completed'
+                              ? 'Download Final Signed PDF'
+                              : `Download Latest Signed PDF (${signedCount}/${totalCount} signed)`
+                          }
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>{doc.status === 'completed' ? 'Final PDF' : 'Latest PDF'}</span>
+                        </a>
+                      );
+                    })()}
+
                     {doc.status === 'completed' ? (
                       <button
                         onClick={(e) => {

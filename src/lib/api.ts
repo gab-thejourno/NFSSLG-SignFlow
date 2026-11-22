@@ -163,6 +163,16 @@ export async function apiUpdateDocumentFields(
     : staticApi.updateDocumentFields(docId, fields);
 }
 
+export async function apiDelegateSignatories(
+  docId: string,
+  targetUserIds: string[],
+  replaceCurrentUser = false
+): Promise<{ document: DocumentItem }> {
+  return isSupabaseConfigured
+    ? supabaseApi.delegateSignatories(docId, targetUserIds, replaceCurrentUser)
+    : staticApi.delegateSignatories(docId, targetUserIds, replaceCurrentUser);
+}
+
 export async function apiCancelDocument(docId: string, _reason?: string): Promise<{ document: DocumentItem }> {
   return isSupabaseConfigured ? supabaseApi.cancelDocument(docId) : staticApi.cancelDocument(docId);
 }

@@ -26,6 +26,8 @@ import {
   Stamp,
   Shield,
   Upload,
+  UserPlus,
+  Search,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -34,14 +36,18 @@ import type {
   DocumentItem,
   SignatureField,
   SignatureRecord,
+  User,
 } from '../../types';
 import { useAuth } from '../../context/AuthContext';
 import {
   apiGetDocument,
+  apiGetUsers,
   apiSignDocument,
   apiSigneePlaceField,
+  apiDelegateSignatories,
   subscribeToRealtime,
 } from '../../lib/api';
+import { isSignatoryForUser, isFieldForUser } from '../../lib/identity';
 import { processSignatureImageToTransparentPng } from '../../lib/signatureProcessor';
 import { SignatureStudioModal } from '../signatures/SignatureStudioModal';
 
@@ -95,6 +101,15 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const [isStudioOpen, setIsStudioOpen] = useState(false);
   const [showMobileSignatories, setShowMobileSignatories] = useState(false);
 
+  // Delegation modal state (anyone can delegate signing to others)
+  const [isDelegateOpen, setIsDelegateOpen] = useState(false);
+  const [delegateDirectory, setDelegateDirectory] = useState<User[]>([]);
+  const [selectedDelegateIds, setSelectedDelegateIds] = useState<string[]>([]);
+  const [delegateSearch, setDelegateSearch] = useState('');
+  const [replaceMyTurn, setReplaceMyTurn] = useState(false);
+  const [isDelegating, setIsDelegating] = useState(false);
+  const [delegateError, setDelegateError] = useState<string | null>(null);
+
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfDocRef = useRef<any>(null);
   const loadedPdfUrlRef = useRef<string | null>(null);
@@ -114,7 +129,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
       // Check if current user already has a pending placement
       const existingField = res.document.fields.find(
-        (f) => f.userId === user?.id && !f.isSigned
+        (f) => isFieldForUser(f, user) && !f.isSigned
       );
       if (existingField) {
         setCustomSignPosition({
@@ -295,7 +310,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   };
 
   // Signatory permissions check
-  const mySignatoryRecord = doc?.signatories.find((s) => s.userId === user?.id);
+  const mySignatoryRecord = doc?.signatories.find((s) => isSignatoryForUser(s, user));
   const isDocLocked =
     doc?.status === 'cancelled' ||
     doc?.status === 'rejected' ||
@@ -312,6 +327,36 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const hasAlreadySigned =
     mySignatoryRecord?.status === 'signed' ||
     Boolean(doc?.signatures.some((s) => s.userId === user?.id));
+
+  const openDelegateModal = async () => {
+    setIsDelegateOpen(true);
+    setSelectedDelegateIds([]);
+    setDelegateSearch('');
+    setReplaceMyTurn(false);
+    setDelegateError(null);
+    try {
+      const res = await apiGetUsers();
+      setDelegateDirectory(res.users.filter((u) => u.status !== 'disabled'));
+    } catch (err: any) {
+      setDelegateError(err?.message || 'Could not load signatory directory.');
+    }
+  };
+
+  const handleConfirmDelegate = async () => {
+    if (!doc || selectedDelegateIds.length === 0) return;
+    setIsDelegating(true);
+    setDelegateError(null);
+    try {
+      const res = await apiDelegateSignatories(doc.id, selectedDelegateIds, replaceMyTurn);
+      setDoc(res.document);
+      setIsDelegateOpen(false);
+      setSelectedDelegateIds([]);
+    } catch (err: any) {
+      setDelegateError(err?.message || 'Failed to delegate document signing.');
+    } finally {
+      setIsDelegating(false);
+    }
+  };
 
   // Signee determines where to sign: Click on page
   const handlePageClickPlaceSignature = async (e: React.MouseEvent<HTMLDivElement>) => {
@@ -348,7 +393,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   // Open confirmation to sign
   const handleOpenSignField = (field: SignatureField) => {
-    if (field.userId !== user?.id) {
+    if (!isFieldForUser(field, user)) {
       alert(`Access Restricted: This signature field is designated exclusively for ${field.fieldLabel}. You cannot sign on behalf of another person.`);
       return;
     }
@@ -596,9 +641,14 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               target="_blank"
               rel="noopener noreferrer"
               className="flex items-center space-x-1 px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition-colors shrink-0 whitespace-nowrap"
+              title={
+                doc.status === 'completed'
+                  ? 'Download Final Completed PDF'
+                  : `Download Latest Signed Version (${signedCount}/${totalCount} signed)`
+              }
             >
               <Download className="w-3.5 h-3.5" />
-              <span>{doc.status === 'completed' ? 'Download Final PDF' : 'Download Merged PDF'}</span>
+              <span>{doc.status === 'completed' ? 'Download Final PDF' : 'Download Latest Signed PDF'}</span>
             </a>
           )}
         </div>
@@ -646,7 +696,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
           <div className="flex-1 overflow-y-auto p-4 space-y-3">
             {doc.signatories.map((sig, idx) => {
-              const isMe = sig.userId === user?.id;
+              const isMe = isSignatoryForUser(sig, user);
               const hasSigned = sig.status === 'signed';
               const isPending = sig.status === 'pending';
 
@@ -737,6 +787,20 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 <p className="text-[11px] text-emerald-800/80">
                   You have successfully signed and locked your official seal on this document.
                 </p>
+              </div>
+            )}
+
+            {/* Universal Delegation Action: anyone can delegate signing to others */}
+            {doc.status !== 'cancelled' && doc.status !== 'rejected' && (
+              <div className="pt-2 border-t border-slate-200 mt-4">
+                <button
+                  type="button"
+                  onClick={openDelegateModal}
+                  className="w-full py-2 px-3 bg-slate-100 hover:bg-blue-50 text-slate-800 hover:text-blue-950 border border-slate-300 hover:border-blue-300 rounded-xl text-xs font-bold transition-colors flex items-center justify-center space-x-1.5"
+                >
+                  <UserPlus className="w-3.5 h-3.5 text-blue-900" />
+                  <span>Delegate Signing to Others</span>
+                </button>
               </div>
             )}
           </div>
@@ -1206,7 +1270,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
             <div className="flex-1 overflow-y-auto p-4 space-y-2.5">
               {doc.signatories.map((sig, idx) => {
-                const isMe = sig.userId === user?.id;
+                const isMe = isSignatoryForUser(sig, user);
                 const hasSigned = sig.status === 'signed';
 
                 return (
@@ -1253,12 +1317,172 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
               })}
             </div>
 
-            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end">
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex flex-col gap-2">
+              {doc.status !== 'cancelled' && doc.status !== 'rejected' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowMobileSignatories(false);
+                    openDelegateModal();
+                  }}
+                  className="w-full py-2.5 bg-white hover:bg-blue-50 text-blue-950 border border-blue-200 rounded-xl text-xs font-bold transition-colors flex items-center justify-center space-x-1.5"
+                >
+                  <UserPlus className="w-4 h-4 text-blue-900" />
+                  <span>Delegate Signing to Others</span>
+                </button>
+              )}
               <button
                 onClick={() => setShowMobileSignatories(false)}
                 className="w-full py-2.5 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-bold transition-colors"
               >
                 Close Signatories List
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Delegate Signing Modal (Available to anyone for delegating to others) */}
+      {isDelegateOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg overflow-hidden flex flex-col max-h-[88vh] animate-in fade-in zoom-in-95 duration-200">
+            <div className="px-5 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <div className="flex items-center space-x-2.5">
+                <div className="p-2 bg-blue-50 text-blue-900 rounded-lg">
+                  <UserPlus className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Delegate Document Signing</h3>
+                  <p className="text-[11px] text-slate-500">
+                    Select any NFSSLG account to sign—even if they have not logged in yet
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsDelegateOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-3 overflow-y-auto flex-1">
+              {delegateError && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-lg">
+                  {delegateError}
+                </div>
+              )}
+
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  value={delegateSearch}
+                  onChange={(e) => setDelegateSearch(e.target.value)}
+                  placeholder="Search by region, name, or username..."
+                  className="w-full pl-9 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-900"
+                />
+              </div>
+
+              {mySignatoryRecord && mySignatoryRecord.status !== 'signed' && (
+                <label className="flex items-center space-x-2 p-2.5 bg-blue-50/60 border border-blue-200 rounded-lg text-xs text-blue-950 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={replaceMyTurn}
+                    onChange={(e) => setReplaceMyTurn(e.target.checked)}
+                    className="w-4 h-4 text-blue-900 rounded border-slate-300"
+                  />
+                  <span>Transfer my pending signing turn to the selected delegate(s)</span>
+                </label>
+              )}
+
+              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-64 overflow-y-auto">
+                {delegateDirectory
+                  .filter((u) => {
+                    const q = delegateSearch.toLowerCase();
+                    return (
+                      u.fullName.toLowerCase().includes(q) ||
+                      (u.username || '').toLowerCase().includes(q) ||
+                      u.department.toLowerCase().includes(q) ||
+                      u.email.toLowerCase().includes(q)
+                    );
+                  })
+                  .map((u) => {
+                    const alreadyAssigned = doc.signatories.some((s) => isSignatoryForUser(s, u));
+                    const isChecked = selectedDelegateIds.includes(u.id);
+                    return (
+                      <div
+                        key={u.id}
+                        onClick={() => {
+                          if (alreadyAssigned) return;
+                          setSelectedDelegateIds((prev) =>
+                            prev.includes(u.id)
+                              ? prev.filter((id) => id !== u.id)
+                              : [...prev, u.id]
+                          );
+                        }}
+                        className={`p-2.5 flex items-center justify-between text-xs ${
+                          alreadyAssigned
+                            ? 'bg-slate-50 opacity-60 cursor-not-allowed'
+                            : isChecked
+                            ? 'bg-blue-50/70 cursor-pointer'
+                            : 'hover:bg-slate-50 cursor-pointer'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2.5">
+                          <div
+                            className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 ${
+                              alreadyAssigned || isChecked
+                                ? 'bg-blue-900 border-blue-900 text-white'
+                                : 'border-slate-300'
+                            }`}
+                          >
+                            {(alreadyAssigned || isChecked) && <Check className="w-3 h-3" />}
+                          </div>
+                          <div>
+                            <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                              <span>{u.fullName}</span>
+                              {u.username && (
+                                <span className="text-[10px] font-mono bg-blue-50 text-blue-800 px-1 rounded">
+                                  {u.username}
+                                </span>
+                              )}
+                            </div>
+                            <div className="text-[11px] text-slate-500">{u.position}</div>
+                          </div>
+                        </div>
+                        {alreadyAssigned && (
+                          <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200">
+                            Assigned
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+              </div>
+            </div>
+
+            <div className="px-5 py-3.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setIsDelegateOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDelegating || selectedDelegateIds.length === 0}
+                onClick={handleConfirmDelegate}
+                className="px-4 py-2 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-xs font-bold disabled:opacity-50 flex items-center space-x-1.5"
+              >
+                <UserPlus className="w-3.5 h-3.5" />
+                <span>
+                  {isDelegating
+                    ? 'Delegating...'
+                    : `Delegate to ${selectedDelegateIds.length || ''} Selected`}
+                </span>
               </button>
             </div>
           </div>

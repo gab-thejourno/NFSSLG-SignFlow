@@ -15,6 +15,7 @@ import {
   processSignatureImageToTransparentPng,
   imageSourceToPngBlob,
 } from './signatureProcessor';
+import { isSignatoryForUser, isFieldForUser } from './identity';
 
 // ==================== LOCAL EVENT BUS FOR IMMEDIATE UI SYNC ====================
 type RealtimeListener = (event: any) => void;
@@ -260,9 +261,20 @@ function mapDbDocumentRow(row: any, sigRows: any[] = []): DocumentItem {
     }));
   } else {
     signatories = signatories.map((sig) => {
-      const matchedSig = signatures.find((s) => s.userId === sig.userId);
+      const matchedSig = signatures.find(
+        (s) =>
+          s.userId === sig.userId ||
+          (s.userEmail &&
+            sig.user?.email &&
+            s.userEmail.toLowerCase() === sig.user.email.toLowerCase())
+      );
       if (matchedSig) {
-        return { ...sig, status: 'signed', signedAt: matchedSig.signedAt };
+        return {
+          ...sig,
+          userId: matchedSig.userId || sig.userId,
+          status: 'signed',
+          signedAt: matchedSig.signedAt,
+        };
       }
       return sig;
     });
@@ -812,21 +824,62 @@ export const supabaseApi = {
 
   async getUsers(): Promise<{ users: User[] }> {
     const client = requireSupabase();
+    let profileRows: any[] = [];
     try {
       const { data, error } = await client
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false });
 
-      if (!error && data && data.length > 0) {
-        return { users: data.map(mapProfileRowToUser) };
+      if (!error && Array.isArray(data)) {
+        profileRows = data;
       }
     } catch {
-      // fallback to current user if profiles table doesn't exist yet
+      // ignore if profiles table doesn't exist yet
     }
 
-    const me = await this.getMe();
-    return { users: [me.user] };
+    const realProfiles = profileRows.map(mapProfileRowToUser);
+    const mergedUsers: User[] = [];
+    const seenEmails = new Set<string>();
+    const now = new Date().toISOString();
+
+    // Always include all 19 pre-authorized NFSSLG accounts (whether logged in or not)
+    for (const preset of Object.values(NFSSLG_ACCOUNT_MAP)) {
+      const presetEmail = preset.email.toLowerCase();
+      seenEmails.add(presetEmail);
+
+      const matchedProfile = realProfiles.find(
+        (p) =>
+          p.email.toLowerCase() === presetEmail ||
+          p.username.toLowerCase() === preset.username.toLowerCase()
+      );
+
+      if (matchedProfile) {
+        mergedUsers.push(matchedProfile);
+      } else {
+        mergedUsers.push({
+          id: `preset:${preset.username}`,
+          email: preset.email,
+          fullName: preset.fullName,
+          username: preset.username,
+          department: preset.department,
+          position: preset.position,
+          role: preset.role,
+          status: 'active',
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+    }
+
+    // Include any additional DB profiles if present
+    for (const p of realProfiles) {
+      if (!seenEmails.has(p.email.toLowerCase())) {
+        mergedUsers.push(p);
+      }
+    }
+
+    return { users: mergedUsers };
   },
 
   async updateUser(id: string, updates: Partial<User>): Promise<{ user: User }> {
@@ -1037,6 +1090,8 @@ export const supabaseApi = {
     } = await client.auth.getUser();
     if (!authUser) throw new Error('Unauthorized');
 
+    const currentUser = await fetchOrSyncProfile(authUser);
+
     const { data: docRows, error } = await client
       .from('documents')
       .select('*')
@@ -1072,7 +1127,7 @@ export const supabaseApi = {
       docs = docs.filter(
         (d) =>
           d.signatories.length === 0 ||
-          d.signatories.some((s) => s.userId === authUser.id)
+          d.signatories.some((s) => isSignatoryForUser(s, currentUser))
       );
     } else if (scope === 'mine') {
       docs = docs.filter((d) => !d.initiatorId || d.initiatorId === authUser.id);
@@ -1088,7 +1143,7 @@ export const supabaseApi = {
       const fs = params.filterStatus;
       if (fs === 'pending') {
         docs = docs.filter((d) => {
-          const sig = d.signatories.find((s) => s.userId === authUser.id);
+          const sig = d.signatories.find((s) => isSignatoryForUser(s, currentUser));
           return sig
             ? sig.status === 'pending'
             : d.status === 'pending_signatures' || d.status === 'in_progress';
@@ -1096,7 +1151,7 @@ export const supabaseApi = {
       } else if (fs === 'signed') {
         docs = docs.filter(
           (d) =>
-            d.signatories.find((s) => s.userId === authUser.id)?.status === 'signed' ||
+            d.signatories.find((s) => isSignatoryForUser(s, currentUser))?.status === 'signed' ||
             d.signatures.some((s) => s.userId === authUser.id)
         );
       } else if (fs === 'overdue') {
@@ -1156,7 +1211,7 @@ export const supabaseApi = {
     const currentUser = await fetchOrSyncProfile(authUser);
 
     const updatedFields = [...currentDoc.fields];
-    let field = updatedFields.find((f) => f.userId === authUser.id && !f.isSigned);
+    let field = updatedFields.find((f) => isFieldForUser(f, currentUser) && !f.isSigned);
 
     if (!field) {
       field = {
@@ -1365,10 +1420,15 @@ export const supabaseApi = {
       : [];
 
     if (updatedSignatories.length > 0) {
-      const idx = updatedSignatories.findIndex((s) => s.userId === authUser.id);
+      const idx = updatedSignatories.findIndex((s) => isSignatoryForUser(s, currentUser));
       if (idx >= 0) {
         updatedSignatories[idx] = {
           ...updatedSignatories[idx],
+          userId: authUser.id,
+          user: {
+            ...(updatedSignatories[idx].user || currentUser),
+            id: authUser.id,
+          },
           status: 'signed',
           signedAt: now,
         };
@@ -1384,7 +1444,8 @@ export const supabaseApi = {
     }
 
     const updatedFields = (Array.isArray(freshDocRow.fields) ? freshDocRow.fields : []).map(
-      (f: SignatureField) => (f.userId === authUser.id ? { ...f, isSigned: true } : f)
+      (f: SignatureField) =>
+        isFieldForUser(f, currentUser) ? { ...f, userId: authUser.id, isSigned: true } : f
     );
 
     const completed =
@@ -1449,6 +1510,99 @@ export const supabaseApi = {
     const { document } = await this.getDocument(docId);
     emitUiEvent({ type: 'FIELDS_UPDATED', payload: { documentId: docId, document } });
     return { document };
+  },
+
+  async delegateSignatories(
+    docId: string,
+    targetUserIds: string[],
+    replaceCurrentUser = false
+  ): Promise<{ document: DocumentItem }> {
+    const client = requireSupabase();
+    const {
+      data: { user: authUser },
+    } = await client.auth.getUser();
+    if (!authUser) throw new Error('Unauthorized');
+
+    const currentUser = await fetchOrSyncProfile(authUser);
+    const { users: allUsers } = await this.getUsers();
+    const { data: freshDocRow, error: fetchErr } = await client
+      .from('documents')
+      .select('*')
+      .eq('id', docId)
+      .single();
+
+    if (fetchErr || !freshDocRow) {
+      throw new Error(fetchErr?.message || 'Document not found');
+    }
+
+    let updatedSignatories: DocumentSignatory[] = Array.isArray(freshDocRow.signatories)
+      ? [...freshDocRow.signatories]
+      : [];
+
+    if (replaceCurrentUser) {
+      updatedSignatories = updatedSignatories.filter(
+        (s) => !(isSignatoryForUser(s, currentUser) && s.status !== 'signed')
+      );
+    }
+
+    for (const targetId of targetUserIds) {
+      const targetUser = allUsers.find((u) => u.id === targetId);
+      if (!targetUser) continue;
+
+      const alreadyPresent = updatedSignatories.some((s) => isSignatoryForUser(s, targetUser));
+      if (alreadyPresent) continue;
+
+      const nextOrder =
+        updatedSignatories.length > 0
+          ? Math.max(...updatedSignatories.map((s) => s.signingOrder || 1)) + 1
+          : 1;
+
+      const hasPriorPending = updatedSignatories.some(
+        (s) => s.status === 'pending' || s.status === 'waiting'
+      );
+
+      updatedSignatories.push({
+        id: `signtry-${targetUser.id}-${Date.now()}`,
+        documentId: docId,
+        userId: targetUser.id,
+        user: targetUser,
+        signingOrder: nextOrder,
+        status:
+          freshDocRow.signing_order_type === 'sequential' && hasPriorPending
+            ? 'waiting'
+            : 'pending',
+      });
+    }
+
+    const allSigned =
+      updatedSignatories.length > 0 &&
+      updatedSignatories.every((s) => s.status === 'signed');
+    const anySigned = updatedSignatories.some((s) => s.status === 'signed');
+    const nextStatus = allSigned
+      ? 'completed'
+      : anySigned
+      ? 'in_progress'
+      : 'pending_signatures';
+
+    const { data: updatedRow, error: updErr } = await client
+      .from('documents')
+      .update({
+        signatories: updatedSignatories,
+        status: nextStatus,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', docId)
+      .select('*')
+      .single();
+
+    if (updErr) {
+      throw new Error(`Failed to delegate signatories: ${updErr.message}`);
+    }
+
+    const sigRows = await fetchDocumentSignaturesRows(docId);
+    const mapped = mapDbDocumentRow(updatedRow, sigRows);
+    emitUiEvent({ type: 'DOCUMENT_UPDATED', payload: { documentId: docId, document: mapped } });
+    return { document: mapped };
   },
 
   async cancelDocument(docId: string): Promise<{ document: DocumentItem }> {

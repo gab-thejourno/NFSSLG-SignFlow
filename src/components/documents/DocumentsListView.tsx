@@ -236,19 +236,30 @@ export const DocumentsListView: React.FC<DocumentsListViewProps> = ({
                   </div>
 
                   <div className="flex items-center space-x-2">
-                    {(doc.status === 'completed' || doc.signatures.length > 0) && (
-                      <a
-                        href={`${doc.finalPdfUrl || doc.originalPdfUrl}${(doc.finalPdfUrl || doc.originalPdfUrl).includes('?') ? '&' : '?'}v=${encodeURIComponent(doc.updatedAt || '1')}`}
-                        download={`${doc.referenceNumber}_Signed.pdf`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-200 flex items-center space-x-1 transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>PDF</span>
-                      </a>
-                    )}
+                    {(doc.status === 'completed' || doc.signatures.length > 0) && (() => {
+                      const rawUrl = doc.finalPdfUrl || doc.originalPdfUrl;
+                      const dlUrl = rawUrl.startsWith('http')
+                        ? `${rawUrl}${rawUrl.includes('?') ? '&' : '?'}v=${encodeURIComponent(doc.updatedAt || '1')}`
+                        : rawUrl;
+                      return (
+                        <a
+                          href={dlUrl}
+                          download={`${doc.referenceNumber}_Signed.pdf`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-200 flex items-center space-x-1 transition-colors"
+                          title={
+                            doc.status === 'completed'
+                              ? 'Download Final Completed PDF'
+                              : `Download Latest Signed Version (${signedCount}/${totalCount} signed)`
+                          }
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>{doc.status === 'completed' ? 'Final PDF' : 'Latest Signed PDF'}</span>
+                        </a>
+                      );
+                    })()}
 
                     <button
                       onClick={(e) => {

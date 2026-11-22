@@ -75,13 +75,10 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
   const loadRegisteredUsers = async () => {
     try {
       const res = await apiGetUsers();
-      // Filter out pending and disabled accounts
-      const activeUsers = res.users.filter((u) => u.status === 'active');
+      // Include all active NFSSLG accounts regardless of whether they have logged in yet
+      const activeUsers = res.users.filter((u) => u.status !== 'disabled');
       setAllUsers(activeUsers);
-      // Preselect current user if not admin
-      if (user && user.status === 'active') {
-        setSelectedSignatories([user]);
-      }
+      setSelectedSignatories([]);
     } catch (err) {
       console.error('Failed to load registered users', err);
     }
@@ -153,6 +150,7 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
     const q = searchUserQuery.toLowerCase();
     return (
       u.fullName.toLowerCase().includes(q) ||
+      (u.username || '').toLowerCase().includes(q) ||
       u.department.toLowerCase().includes(q) ||
       u.position.toLowerCase().includes(q) ||
       u.email.toLowerCase().includes(q)
@@ -573,13 +571,50 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
           {/* STEP 2: SELECT SIGNATORIES */}
           {step === 2 && (
             <div className="space-y-4">
-              <div>
-                <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
-                  Designate Signatories from Organization Directory
-                </h3>
-                <p className="text-xs text-slate-500">
-                  Select all authorized individuals who must review and execute this document.
-                </p>
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div>
+                  <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                    Designate &amp; Delegate Signatories ({allUsers.length} Accounts)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Anyone can delegate signing to any region or Central Office—even if they have not logged in yet.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {user && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const selfInList =
+                          allUsers.find(
+                            (u) =>
+                              u.id === user.id ||
+                              u.email.toLowerCase() === user.email.toLowerCase()
+                          ) || user;
+                        if (!selectedSignatories.some((s) => s.email.toLowerCase() === selfInList.email.toLowerCase())) {
+                          setSelectedSignatories([...selectedSignatories, selfInList]);
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-semibold border border-slate-200"
+                    >
+                      + Include Me
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allRegions = allUsers.filter((u) => u.role !== 'admin');
+                      const merged = [...selectedSignatories];
+                      allRegions.forEach((r) => {
+                        if (!merged.some((m) => m.id === r.id)) merged.push(r);
+                      });
+                      setSelectedSignatories(merged);
+                    }}
+                    className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-900 rounded-lg text-[11px] font-semibold border border-blue-200"
+                  >
+                    + All 18 Regions
+                  </button>
+                </div>
               </div>
 
               {/* Search & Bulk Select */}
@@ -590,7 +625,7 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
                     type="text"
                     value={searchUserQuery}
                     onChange={(e) => setSearchUserQuery(e.target.value)}
-                    placeholder="Search by name, department, or designation..."
+                    placeholder="Search by region, name, username (e.g. nfsslg-r11)..."
                     className="w-full pl-9 pr-3 py-1.5 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-blue-900"
                   />
                 </div>
@@ -605,9 +640,12 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
               </div>
 
               {/* User Selector List */}
-              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-56 overflow-y-auto">
+              <div className="border border-slate-200 rounded-xl divide-y divide-slate-100 max-h-64 overflow-y-auto">
                 {filteredUsers.map((u) => {
                   const isSelected = selectedSignatories.some((s) => s.id === u.id);
+                  const isMe =
+                    user &&
+                    (u.id === user.id || u.email.toLowerCase() === user.email.toLowerCase());
                   return (
                     <div
                       key={u.id}
@@ -618,7 +656,7 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
                     >
                       <div className="flex items-center space-x-3">
                         <div
-                          className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                          className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 ${
                             isSelected
                               ? 'bg-blue-900 border-blue-900 text-white'
                               : 'border-slate-300'
@@ -627,9 +665,14 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
                           {isSelected && <Check className="w-3 h-3" />}
                         </div>
                         <div>
-                          <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                          <div className="text-xs font-bold text-slate-900 flex items-center gap-1.5 flex-wrap">
                             <span>{u.fullName}</span>
-                            {u.id === user?.id && (
+                            {u.username && (
+                              <span className="text-[10px] font-mono bg-blue-50 text-blue-800 px-1.5 py-0.2 rounded border border-blue-100">
+                                {u.username}
+                              </span>
+                            )}
+                            {isMe && (
                               <span className="text-[10px] bg-slate-100 text-slate-600 px-1 rounded">
                                 You
                               </span>
@@ -640,7 +683,7 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
                           </div>
                         </div>
                       </div>
-                      <span className="text-[11px] text-slate-400">{u.email}</span>
+                      <span className="text-[11px] text-slate-400 hidden sm:inline">{u.email}</span>
                     </div>
                   );
                 })}
