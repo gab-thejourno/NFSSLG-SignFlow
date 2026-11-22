@@ -81,6 +81,11 @@ function getAuthenticatedUser(req: Request) {
   return safeUser;
 }
 
+// ==================== HEALTH CHECK ====================
+app.get('/api/health', (_req: Request, res: Response) => {
+  return res.json({ ok: true, mode: 'server', timestamp: Date.now() });
+});
+
 // ==================== AUTH ROUTES ====================
 app.post('/api/auth/login', async (req: Request, res: Response) => {
   const { email, username, identifier, password } = req.body;

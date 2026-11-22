@@ -20,8 +20,9 @@ export const LoginPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     if (!identifier.trim()) {
       setError('Please enter your username (e.g. nfsslg-yfd, nfsslg-ncr, nfsslg-r11, or region name).');
       return;
@@ -104,7 +105,7 @@ export const LoginPage: React.FC = () => {
               </div>
             )}
 
-            <form onSubmit={handleSubmit} className="space-y-4">
+            <form action="#" onSubmit={handleSubmit} noValidate className="space-y-4">
               {/* Identifier Input */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">

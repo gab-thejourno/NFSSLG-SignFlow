@@ -6,6 +6,7 @@ import type {
   OrganizationSettings,
   SignatureField,
 } from '../types';
+import { staticApi, subscribeStaticRealtime } from './staticClientStore';
 
 const TOKEN_KEY = 'signflow_auth_token';
 
@@ -18,6 +19,75 @@ export function setStoredToken(token: string | null) {
     localStorage.setItem(TOKEN_KEY, token);
   } else {
     localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+class StaticHostFallbackError extends Error {
+  constructor(message = 'Backend unavailable; using client-side static mode') {
+    super(message);
+    this.name = 'StaticHostFallbackError';
+  }
+}
+
+let backendAvailable: boolean | null = null;
+let backendCheckPromise: Promise<boolean> | null = null;
+
+/**
+ * Safely probes backend availability using a GET request (never POST,
+ * so static hosts like Cloudflare Pages never return HTTP 405).
+ */
+export async function hasBackend(): Promise<boolean> {
+  if (backendAvailable !== null) {
+    return backendAvailable;
+  }
+  if (backendCheckPromise) {
+    return backendCheckPromise;
+  }
+
+  backendCheckPromise = (async () => {
+    try {
+      const res = await fetch('/api/health', {
+        method: 'GET',
+        cache: 'no-store',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      });
+
+      const contentType = res.headers.get('content-type') || '';
+      if (!res.ok || !contentType.includes('application/json')) {
+        backendAvailable = false;
+        return false;
+      }
+
+      const data = await res.json();
+      backendAvailable = Boolean(data && data.ok === true && data.mode === 'server');
+      return backendAvailable;
+    } catch {
+      backendAvailable = false;
+      return false;
+    } finally {
+      backendCheckPromise = null;
+    }
+  })();
+
+  return backendCheckPromise;
+}
+
+async function withBackendFallback<T>(
+  serverFn: () => Promise<T>,
+  staticFn: () => Promise<T>
+): Promise<T> {
+  if (!(await hasBackend())) {
+    return staticFn();
+  }
+  try {
+    return await serverFn();
+  } catch (err) {
+    if (err instanceof StaticHostFallbackError) {
+      backendAvailable = false;
+      return staticFn();
+    }
+    throw err;
   }
 }
 
@@ -61,10 +131,20 @@ async function request<T>(endpoint: string, options: RequestInit = {}, retries =
     );
   }
 
+  // Static hosts like Cloudflare Pages return 405 Method Not Allowed on POST /api/*
+  if (res.status === 405) {
+    backendAvailable = false;
+    throw new StaticHostFallbackError('Static host returned HTTP 405; switching to client-side mode.');
+  }
+
   const contentType = res.headers.get('content-type') || '';
 
-  // If the server returned HTML (transient reverse-proxy cold-start or gateway glitch)
+  // If the server returned HTML (static SPA fallback or transient reverse-proxy cold-start)
   if (contentType.includes('text/html')) {
+    if (res.status === 404) {
+      backendAvailable = false;
+      throw new StaticHostFallbackError('Static host returned 404 HTML; switching to client-side mode.');
+    }
     if (retries > 0) {
       await new Promise((r) => setTimeout(r, 700));
       return request<T>(endpoint, options, retries - 1);
@@ -98,10 +178,14 @@ async function request<T>(endpoint: string, options: RequestInit = {}, retries =
 
 // Authentication
 export async function apiLogin(identifier: string, password: string): Promise<{ user: User; token: string }> {
-  const data = await request<{ user: User; token: string }>('/api/auth/login', {
-    method: 'POST',
-    body: JSON.stringify({ identifier, password }),
-  });
+  const data = await withBackendFallback(
+    () =>
+      request<{ user: User; token: string }>('/api/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ identifier, password }),
+      }),
+    () => staticApi.login(identifier, password)
+  );
   setStoredToken(data.token);
   return data;
 }
@@ -116,10 +200,14 @@ export async function apiSigneePlaceField(
     heightPercent?: number;
   }
 ): Promise<{ success: boolean; document: DocumentItem; field: SignatureField }> {
-  return request(`/api/documents/${docId}/signee-place-field`, {
-    method: 'POST',
-    body: JSON.stringify(coordinates),
-  });
+  return withBackendFallback(
+    () =>
+      request(`/api/documents/${docId}/signee-place-field`, {
+        method: 'POST',
+        body: JSON.stringify(coordinates),
+      }),
+    () => staticApi.signeePlaceField(docId, coordinates)
+  );
 }
 
 export async function apiRegister(userData: {
@@ -130,49 +218,78 @@ export async function apiRegister(userData: {
   position: string;
   username?: string;
 }): Promise<{ user: User; requiresApproval: boolean; message: string }> {
-  return request('/api/auth/register', {
-    method: 'POST',
-    body: JSON.stringify(userData),
-  });
+  return withBackendFallback(
+    () =>
+      request('/api/auth/register', {
+        method: 'POST',
+        body: JSON.stringify(userData),
+      }),
+    () => staticApi.register(userData)
+  );
 }
 
 export async function apiGetMe(): Promise<{ user: User }> {
-  return request('/api/auth/me');
+  return withBackendFallback(
+    () => request('/api/auth/me'),
+    () => staticApi.getMe()
+  );
 }
 
 export async function apiUpdateProfile(updates: Partial<User>): Promise<{ user: User }> {
-  return request('/api/auth/profile', {
-    method: 'POST',
-    body: JSON.stringify(updates),
-  });
+  return withBackendFallback(
+    () =>
+      request('/api/auth/profile', {
+        method: 'POST',
+        body: JSON.stringify(updates),
+      }),
+    () => staticApi.updateProfile(updates)
+  );
 }
 
-export async function apiChangePassword(currentPassword: string, newPassword: string): Promise<{ success: boolean; message: string }> {
-  return request('/api/auth/change-password', {
-    method: 'POST',
-    body: JSON.stringify({ currentPassword, newPassword }),
-  });
+export async function apiChangePassword(
+  currentPassword: string,
+  newPassword: string
+): Promise<{ success: boolean; message: string }> {
+  return withBackendFallback(
+    () =>
+      request('/api/auth/change-password', {
+        method: 'POST',
+        body: JSON.stringify({ currentPassword, newPassword }),
+      }),
+    () => staticApi.changePassword(currentPassword, newPassword)
+  );
 }
 
 export async function apiSwitchUser(userId: string): Promise<{ user: User; token: string }> {
-  const data = await request<{ user: User; token: string }>('/api/auth/switch-user', {
-    method: 'POST',
-    body: JSON.stringify({ userId }),
-  });
+  const data = await withBackendFallback(
+    () =>
+      request<{ user: User; token: string }>('/api/auth/switch-user', {
+        method: 'POST',
+        body: JSON.stringify({ userId }),
+      }),
+    () => staticApi.switchUser(userId)
+  );
   setStoredToken(data.token);
   return data;
 }
 
 // Users
 export async function apiGetUsers(): Promise<{ users: User[] }> {
-  return request('/api/users');
+  return withBackendFallback(
+    () => request('/api/users'),
+    () => staticApi.getUsers()
+  );
 }
 
 export async function apiUpdateUser(id: string, updates: Partial<User>): Promise<{ user: User }> {
-  return request(`/api/users/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(updates),
-  });
+  return withBackendFallback(
+    () =>
+      request(`/api/users/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates),
+      }),
+    () => staticApi.updateUser(id, updates)
+  );
 }
 
 // Documents
@@ -186,32 +303,46 @@ export async function apiGetDocuments(params?: {
   if (params?.filterStatus) query.set('filterStatus', params.filterStatus);
   if (params?.search) query.set('search', params.search);
 
-  return request(`/api/documents?${query.toString()}`);
+  return withBackendFallback(
+    () => request(`/api/documents?${query.toString()}`),
+    () => staticApi.getDocuments(params)
+  );
 }
 
 export async function apiGetDocument(id: string): Promise<{ document: DocumentItem }> {
-  return request(`/api/documents/${id}`);
+  return withBackendFallback(
+    () => request(`/api/documents/${id}`),
+    () => staticApi.getDocument(id)
+  );
 }
 
-export async function apiUploadPdf(file?: File, templateData?: {
-  templateTitle: string;
-  templateRef: string;
-  category: string;
-  signers?: string[];
-}): Promise<{ fileUrl: string; filename: string; size?: number; pageCount: number }> {
-  if (file) {
-    const formData = new FormData();
-    formData.append('file', file);
-    return request('/api/documents/upload', {
-      method: 'POST',
-      body: formData,
-    });
+export async function apiUploadPdf(
+  file?: File,
+  templateData?: {
+    templateTitle: string;
+    templateRef: string;
+    category: string;
+    signers?: string[];
   }
+): Promise<{ fileUrl: string; filename: string; size?: number; pageCount: number }> {
+  return withBackendFallback(
+    () => {
+      if (file) {
+        const formData = new FormData();
+        formData.append('file', file);
+        return request('/api/documents/upload', {
+          method: 'POST',
+          body: formData,
+        });
+      }
 
-  return request('/api/documents/upload', {
-    method: 'POST',
-    body: JSON.stringify(templateData || {}),
-  });
+      return request('/api/documents/upload', {
+        method: 'POST',
+        body: JSON.stringify(templateData || {}),
+      });
+    },
+    () => staticApi.uploadPdf(file, templateData)
+  );
 }
 
 export async function apiCreateDocument(data: {
@@ -226,10 +357,14 @@ export async function apiCreateDocument(data: {
   fields?: Partial<SignatureField>[];
   pdfUrl: string;
 }): Promise<{ document: DocumentItem }> {
-  return request('/api/documents/create', {
-    method: 'POST',
-    body: JSON.stringify(data),
-  });
+  return withBackendFallback(
+    () =>
+      request('/api/documents/create', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    () => staticApi.createDocument(data)
+  );
 }
 
 export async function apiSignDocument(
@@ -246,106 +381,167 @@ export async function apiSignDocument(
     };
   }
 ): Promise<{ success: boolean; document: DocumentItem; signature: any; completed: boolean }> {
-  return request(`/api/documents/${docId}/sign`, {
-    method: 'POST',
-    body: JSON.stringify(payload),
-  });
+  return withBackendFallback(
+    () =>
+      request(`/api/documents/${docId}/sign`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }),
+    () => staticApi.signDocument(docId, payload)
+  );
 }
 
 export async function apiUpdateDocumentFields(
   docId: string,
   fields: SignatureField[]
 ): Promise<{ document: DocumentItem }> {
-  return request(`/api/documents/${docId}/fields`, {
-    method: 'POST',
-    body: JSON.stringify({ fields }),
-  });
+  return withBackendFallback(
+    () =>
+      request(`/api/documents/${docId}/fields`, {
+        method: 'POST',
+        body: JSON.stringify({ fields }),
+      }),
+    () => staticApi.updateDocumentFields(docId, fields)
+  );
 }
 
-export async function apiCancelDocument(docId: string, reason?: string): Promise<{ document: DocumentItem }> {
-  return request(`/api/documents/${docId}/cancel`, {
-    method: 'POST',
-    body: JSON.stringify({ reason }),
-  });
+export async function apiCancelDocument(docId: string, _reason?: string): Promise<{ document: DocumentItem }> {
+  return withBackendFallback(
+    () =>
+      request(`/api/documents/${docId}/cancel`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: _reason }),
+      }),
+    () => staticApi.cancelDocument(docId)
+  );
 }
 
 export async function apiRejectDocument(docId: string, reason?: string): Promise<{ document: DocumentItem }> {
-  return request(`/api/documents/${docId}/reject`, {
-    method: 'POST',
-    body: JSON.stringify({ reason }),
-  });
+  return withBackendFallback(
+    () =>
+      request(`/api/documents/${docId}/reject`, {
+        method: 'POST',
+        body: JSON.stringify({ reason }),
+      }),
+    () => staticApi.rejectDocument(docId, reason)
+  );
 }
 
 // Personal Signature Upload
 export async function apiUploadSignaturePng(dataUrlOrFile: string | File): Promise<{ url: string }> {
-  if (typeof dataUrlOrFile === 'string') {
-    return request('/api/signatures/upload', {
-      method: 'POST',
-      body: JSON.stringify({ dataUrl: dataUrlOrFile }),
-    });
-  }
+  return withBackendFallback(
+    () => {
+      if (typeof dataUrlOrFile === 'string') {
+        return request('/api/signatures/upload', {
+          method: 'POST',
+          body: JSON.stringify({ dataUrl: dataUrlOrFile }),
+        });
+      }
 
-  const formData = new FormData();
-  formData.append('signature', dataUrlOrFile);
-  return request('/api/signatures/upload', {
-    method: 'POST',
-    body: formData,
-  });
+      const formData = new FormData();
+      formData.append('signature', dataUrlOrFile);
+      return request('/api/signatures/upload', {
+        method: 'POST',
+        body: formData,
+      });
+    },
+    () => staticApi.uploadSignaturePng(dataUrlOrFile)
+  );
 }
 
 // Audit Events
 export async function apiGetEvents(): Promise<{ events: DocumentEvent[] }> {
-  return request('/api/events');
+  return withBackendFallback(
+    () => request('/api/events'),
+    () => staticApi.getEvents()
+  );
 }
 
 // Notifications
 export async function apiGetNotifications(): Promise<{ notifications: AppNotification[] }> {
-  return request('/api/notifications');
+  return withBackendFallback(
+    () => request('/api/notifications'),
+    () => staticApi.getNotifications()
+  );
 }
 
 export async function apiMarkNotificationRead(id: string): Promise<{ success: boolean }> {
-  return request(`/api/notifications/${id}/read`, {
-    method: 'PATCH',
-  });
+  return withBackendFallback(
+    () =>
+      request(`/api/notifications/${id}/read`, {
+        method: 'PATCH',
+      }),
+    () => staticApi.markNotificationRead(id)
+  );
 }
 
 export async function apiMarkAllNotificationsRead(): Promise<{ success: boolean }> {
-  return request('/api/notifications/read-all', {
-    method: 'POST',
-  });
+  return withBackendFallback(
+    () =>
+      request('/api/notifications/read-all', {
+        method: 'POST',
+      }),
+    () => staticApi.markAllNotificationsRead()
+  );
 }
 
 // Settings
 export async function apiGetSettings(): Promise<{ settings: OrganizationSettings }> {
-  return request('/api/settings');
+  return withBackendFallback(
+    () => request('/api/settings'),
+    () => staticApi.getSettings()
+  );
 }
 
-export async function apiUpdateSettings(settings: Partial<OrganizationSettings>): Promise<{ settings: OrganizationSettings }> {
-  return request('/api/settings', {
-    method: 'PATCH',
-    body: JSON.stringify(settings),
-  });
+export async function apiUpdateSettings(
+  settings: Partial<OrganizationSettings>
+): Promise<{ settings: OrganizationSettings }> {
+  return withBackendFallback(
+    () =>
+      request('/api/settings', {
+        method: 'PATCH',
+        body: JSON.stringify(settings),
+      }),
+    () => staticApi.updateSettings(settings)
+  );
 }
 
-// Real-time EventSource listener
+// Real-time EventSource listener (uses BroadcastChannel/local events when running as static site)
 export function subscribeToRealtime(userId: string | undefined, onEvent: (event: any) => void): () => void {
-  const url = userId ? `/api/realtime?userId=${encodeURIComponent(userId)}` : '/api/realtime';
-  const eventSource = new EventSource(url);
+  let disposed = false;
+  let cleanup: (() => void) | null = null;
 
-  eventSource.onmessage = (e) => {
-    try {
-      const data = JSON.parse(e.data);
-      onEvent(data);
-    } catch {
-      // ignore
+  hasBackend().then((available) => {
+    if (disposed) return;
+
+    if (!available) {
+      cleanup = subscribeStaticRealtime(onEvent);
+      return;
     }
-  };
 
-  eventSource.onerror = () => {
-    // EventSource automatically retries
-  };
+    const url = userId ? `/api/realtime?userId=${encodeURIComponent(userId)}` : '/api/realtime';
+    const eventSource = new EventSource(url);
+
+    eventSource.onmessage = (e) => {
+      try {
+        const data = JSON.parse(e.data);
+        onEvent(data);
+      } catch {
+        // ignore
+      }
+    };
+
+    eventSource.onerror = () => {
+      // EventSource automatically retries when backend is active
+    };
+
+    cleanup = () => {
+      eventSource.close();
+    };
+  });
 
   return () => {
-    eventSource.close();
+    disposed = true;
+    cleanup?.();
   };
 }
