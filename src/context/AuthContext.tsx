@@ -3,7 +3,6 @@ import type { User, AppNotification } from '../types';
 import {
   apiGetMe,
   apiLogin,
-  apiRegister,
   apiLogout,
   apiUpdateProfile,
   apiChangePassword,
@@ -12,20 +11,12 @@ import {
   apiMarkAllNotificationsRead,
   subscribeToRealtime,
 } from '../lib/api';
-import { supabase } from '../lib/supabaseClient';
+import { supabase, isSupabaseConfigured } from '../lib/supabaseClient';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (email: string, pass: string) => Promise<void>;
-  register: (data: {
-    fullName: string;
-    email: string;
-    password: string;
-    department: string;
-    position: string;
-    username?: string;
-  }) => Promise<{ requiresApproval: boolean; sessionActive: boolean; message: string }>;
+  login: (identifier: string, pass: string) => Promise<void>;
   logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
   changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
@@ -67,7 +58,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     fetchCurrentUser();
 
-    if (!supabase) return;
+    if (!isSupabaseConfigured || !supabase) return;
 
     const {
       data: { subscription },
@@ -105,29 +96,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [user?.id]);
 
-  const login = async (email: string, pass: string) => {
-    const res = await apiLogin(email, pass);
+  const login = async (identifier: string, pass: string) => {
+    const res = await apiLogin(identifier, pass);
     setUser(res.user);
     await loadNotifications();
-  };
-
-  const register = async (data: {
-    fullName: string;
-    email: string;
-    password: string;
-    department: string;
-    position: string;
-    username?: string;
-  }) => {
-    const res = await apiRegister(data);
-    if (res.sessionActive) {
-      setUser(res.user);
-    }
-    return {
-      requiresApproval: res.requiresApproval,
-      sessionActive: res.sessionActive,
-      message: res.message,
-    };
   };
 
   const logout = async () => {
@@ -165,7 +137,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user,
         loading,
         login,
-        register,
         logout,
         updateProfile,
         changePassword,

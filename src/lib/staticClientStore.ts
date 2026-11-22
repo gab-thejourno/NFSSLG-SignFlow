@@ -867,40 +867,15 @@ export const staticApi = {
     return { user: sanitizeUser(user), token: user.id };
   },
 
-  async register(userData: {
+  async register(_userData: {
     fullName: string;
     email: string;
     password: string;
     department: string;
     position: string;
     username?: string;
-  }): Promise<{ user: User; requiresApproval: boolean; message: string }> {
-    const db = loadStaticDb();
-    if (matchUserByIdentifier(db.users, userData.email)) {
-      throw new Error('A user with this email address already exists.');
-    }
-    const now = new Date().toISOString();
-    const status = db.settings.requireAdminApproval ? 'pending' : 'active';
-    const newUser: StoredUser = {
-      id: `usr-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      fullName: userData.fullName,
-      email: userData.email,
-      username: userData.username || userData.email.split('@')[0],
-      password: userData.password,
-      department: userData.department || 'General Administration',
-      position: userData.position || 'Team Member',
-      role: 'user',
-      status,
-      createdAt: now,
-      updatedAt: now,
-    };
-    db.users.push(newUser);
-    saveStaticDb(db);
-    return {
-      user: sanitizeUser(newUser),
-      requiresApproval: status === 'pending',
-      message: status === 'pending' ? 'Account pending approval.' : 'Registration successful.',
-    };
+  }): Promise<never> {
+    throw new Error('Public account creation is disabled. Only pre-authorized NFSSLG accounts can sign in.');
   },
 
   async getMe(): Promise<{ user: User }> {

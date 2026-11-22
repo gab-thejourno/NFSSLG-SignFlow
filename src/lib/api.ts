@@ -7,52 +7,67 @@ import type {
   SignatureField,
 } from '../types';
 import { supabaseApi } from './supabaseApi';
+import { staticApi, subscribeStaticRealtime } from './staticClientStore';
 import { isSupabaseConfigured } from './supabaseClient';
+import { processSignatureImageToTransparentPng } from './signatureProcessor';
 
 export { isSupabaseConfigured };
 
-// Authentication
-export async function apiLogin(email: string, password: string): Promise<{ user: User; token: string }> {
-  return supabaseApi.login(email, password);
+const TOKEN_KEY = 'signflow_auth_token';
+
+export function getStoredToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY);
 }
 
-export async function apiRegister(userData: {
-  fullName: string;
-  email: string;
-  password: string;
-  department: string;
-  position: string;
-  username?: string;
-}): Promise<{ user: User; requiresApproval: boolean; sessionActive: boolean; message: string }> {
-  return supabaseApi.register(userData);
+export function setStoredToken(token: string | null) {
+  if (token) {
+    localStorage.setItem(TOKEN_KEY, token);
+  } else {
+    localStorage.removeItem(TOKEN_KEY);
+  }
+}
+
+// Authentication (Username/Identifier + Password; no public registration)
+export async function apiLogin(identifier: string, password: string): Promise<{ user: User; token: string }> {
+  if (isSupabaseConfigured) {
+    return supabaseApi.login(identifier, password);
+  }
+  const data = await staticApi.login(identifier, password);
+  setStoredToken(data.token);
+  return data;
 }
 
 export async function apiLogout(): Promise<void> {
-  return supabaseApi.logout();
+  setStoredToken(null);
+  if (isSupabaseConfigured) {
+    await supabaseApi.logout();
+  }
 }
 
 export async function apiGetMe(): Promise<{ user: User }> {
-  return supabaseApi.getMe();
+  return isSupabaseConfigured ? supabaseApi.getMe() : staticApi.getMe();
 }
 
 export async function apiUpdateProfile(updates: Partial<User>): Promise<{ user: User }> {
-  return supabaseApi.updateProfile(updates);
+  return isSupabaseConfigured ? supabaseApi.updateProfile(updates) : staticApi.updateProfile(updates);
 }
 
 export async function apiChangePassword(
   currentPassword: string,
   newPassword: string
 ): Promise<{ success: boolean; message: string }> {
-  return supabaseApi.changePassword(currentPassword, newPassword);
+  return isSupabaseConfigured
+    ? supabaseApi.changePassword(currentPassword, newPassword)
+    : staticApi.changePassword(currentPassword, newPassword);
 }
 
 // Users
 export async function apiGetUsers(): Promise<{ users: User[] }> {
-  return supabaseApi.getUsers();
+  return isSupabaseConfigured ? supabaseApi.getUsers() : staticApi.getUsers();
 }
 
 export async function apiUpdateUser(id: string, updates: Partial<User>): Promise<{ user: User }> {
-  return supabaseApi.updateUser(id, updates);
+  return isSupabaseConfigured ? supabaseApi.updateUser(id, updates) : staticApi.updateUser(id, updates);
 }
 
 // Documents
@@ -61,11 +76,11 @@ export async function apiGetDocuments(params?: {
   filterStatus?: string;
   search?: string;
 }): Promise<{ documents: DocumentItem[] }> {
-  return supabaseApi.getDocuments(params);
+  return isSupabaseConfigured ? supabaseApi.getDocuments(params) : staticApi.getDocuments(params);
 }
 
 export async function apiGetDocument(id: string): Promise<{ document: DocumentItem }> {
-  return supabaseApi.getDocument(id);
+  return isSupabaseConfigured ? supabaseApi.getDocument(id) : staticApi.getDocument(id);
 }
 
 export async function apiUploadPdf(
@@ -77,7 +92,7 @@ export async function apiUploadPdf(
     signers?: string[];
   }
 ): Promise<{ fileUrl: string; filename: string; size?: number; pageCount: number }> {
-  return supabaseApi.uploadPdf(file, templateData);
+  return isSupabaseConfigured ? supabaseApi.uploadPdf(file, templateData) : staticApi.uploadPdf(file, templateData);
 }
 
 export async function apiCreateDocument(data: {
@@ -92,7 +107,7 @@ export async function apiCreateDocument(data: {
   fields?: Partial<SignatureField>[];
   pdfUrl: string;
 }): Promise<{ document: DocumentItem }> {
-  return supabaseApi.createDocument(data);
+  return isSupabaseConfigured ? supabaseApi.createDocument(data) : staticApi.createDocument(data);
 }
 
 export async function apiSigneePlaceField(
@@ -105,7 +120,9 @@ export async function apiSigneePlaceField(
     heightPercent?: number;
   }
 ): Promise<{ success: boolean; document: DocumentItem; field: SignatureField }> {
-  return supabaseApi.signeePlaceField(docId, coordinates);
+  return isSupabaseConfigured
+    ? supabaseApi.signeePlaceField(docId, coordinates)
+    : staticApi.signeePlaceField(docId, coordinates);
 }
 
 export async function apiSignDocument(
@@ -123,59 +140,78 @@ export async function apiSignDocument(
     };
   }
 ): Promise<{ success: boolean; document: DocumentItem; signature: any; completed: boolean }> {
-  return supabaseApi.signDocument(docId, payload);
+  if (isSupabaseConfigured) {
+    return supabaseApi.signDocument(docId, payload);
+  }
+  let signaturePng = payload.signaturePng;
+  if (!signaturePng && payload.signatureFile) {
+    const processed = await processSignatureImageToTransparentPng(payload.signatureFile);
+    signaturePng = processed.dataUrl;
+  }
+  return staticApi.signDocument(docId, {
+    ...payload,
+    signaturePng,
+  });
 }
 
 export async function apiUpdateDocumentFields(
   docId: string,
   fields: SignatureField[]
 ): Promise<{ document: DocumentItem }> {
-  return supabaseApi.updateDocumentFields(docId, fields);
+  return isSupabaseConfigured
+    ? supabaseApi.updateDocumentFields(docId, fields)
+    : staticApi.updateDocumentFields(docId, fields);
 }
 
 export async function apiCancelDocument(docId: string, _reason?: string): Promise<{ document: DocumentItem }> {
-  return supabaseApi.cancelDocument(docId);
+  return isSupabaseConfigured ? supabaseApi.cancelDocument(docId) : staticApi.cancelDocument(docId);
 }
 
 export async function apiRejectDocument(docId: string, reason?: string): Promise<{ document: DocumentItem }> {
-  return supabaseApi.rejectDocument(docId, reason);
+  return isSupabaseConfigured ? supabaseApi.rejectDocument(docId, reason) : staticApi.rejectDocument(docId, reason);
 }
 
-// Personal Signature Upload & Background Removal
+// Personal Signature Upload & White-Background Removal
 export async function apiUploadSignaturePng(dataUrlOrFile: string | File): Promise<{ url: string }> {
-  return supabaseApi.uploadSignaturePng(dataUrlOrFile);
+  if (isSupabaseConfigured) {
+    return supabaseApi.uploadSignaturePng(dataUrlOrFile);
+  }
+  const processed = await processSignatureImageToTransparentPng(dataUrlOrFile);
+  return { url: processed.dataUrl };
 }
 
 // Audit Events
 export async function apiGetEvents(): Promise<{ events: DocumentEvent[] }> {
-  return supabaseApi.getEvents();
+  return isSupabaseConfigured ? supabaseApi.getEvents() : staticApi.getEvents();
 }
 
 // Notifications
 export async function apiGetNotifications(): Promise<{ notifications: AppNotification[] }> {
-  return supabaseApi.getNotifications();
+  return isSupabaseConfigured ? supabaseApi.getNotifications() : staticApi.getNotifications();
 }
 
 export async function apiMarkNotificationRead(id: string): Promise<{ success: boolean }> {
-  return supabaseApi.markNotificationRead(id);
+  return isSupabaseConfigured ? supabaseApi.markNotificationRead(id) : staticApi.markNotificationRead(id);
 }
 
 export async function apiMarkAllNotificationsRead(): Promise<{ success: boolean }> {
-  return supabaseApi.markAllNotificationsRead();
+  return isSupabaseConfigured ? supabaseApi.markAllNotificationsRead() : staticApi.markAllNotificationsRead();
 }
 
 // Settings
 export async function apiGetSettings(): Promise<{ settings: OrganizationSettings }> {
-  return supabaseApi.getSettings();
+  return isSupabaseConfigured ? supabaseApi.getSettings() : staticApi.getSettings();
 }
 
 export async function apiUpdateSettings(
   settings: Partial<OrganizationSettings>
 ): Promise<{ settings: OrganizationSettings }> {
-  return supabaseApi.updateSettings(settings);
+  return isSupabaseConfigured ? supabaseApi.updateSettings(settings) : staticApi.updateSettings(settings);
 }
 
-// Realtime listener (Supabase Postgres Changes + UI sync)
+// Realtime listener
 export function subscribeToRealtime(userId: string | undefined, onEvent: (event: any) => void): () => void {
-  return supabaseApi.subscribeToRealtime(userId, onEvent);
+  return isSupabaseConfigured
+    ? supabaseApi.subscribeToRealtime(userId, onEvent)
+    : subscribeStaticRealtime(onEvent);
 }

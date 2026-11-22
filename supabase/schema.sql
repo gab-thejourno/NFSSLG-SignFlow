@@ -192,3 +192,88 @@ create policy "Authenticated update access for signatures"
   on storage.objects for update
   to authenticated
   using (bucket_id = 'signatures');
+
+-- 5. Seed the 19 Pre-Authorized NFSSLG Accounts (Default Password: adminpassword)
+-- Tip: In Supabase Dashboard -> Authentication -> Providers -> Email, turn OFF "Allow new users to sign up"
+-- so only you (via Supabase Dashboard/SQL) can create or manage accounts.
+do $$
+declare
+  acct record;
+  new_uid uuid;
+begin
+  for acct in
+    select * from (values
+      ('centraloffice@signflow.gov.ph', 'nfsslg-yfd', 'Central Office - Youth Formation Division (YFD)', 'National Federation of SSLG Central Office (YFD)', 'Central Office Administrator', 'admin'),
+      ('ncr@signflow.gov.ph', 'nfsslg-ncr', 'RFSSLG President - NCR (National Capital Region)', 'Regional Federation of SSLG - NCR (National Capital Region)', 'RFSSLG President', 'user'),
+      ('car@signflow.gov.ph', 'nfsslg-car', 'RFSSLG President - CAR (Cordillera Administrative Region)', 'Regional Federation of SSLG - CAR (Cordillera Administrative Region)', 'RFSSLG President', 'user'),
+      ('nir@signflow.gov.ph', 'nfsslg-nir', 'RFSSLG President - NIR (Negros Island Region)', 'Regional Federation of SSLG - NIR (Negros Island Region)', 'RFSSLG President', 'user'),
+      ('barmm@signflow.gov.ph', 'nfsslg-barmm', 'RFSSLG President - BARMM (Bangsamoro Autonomous Region)', 'Regional Federation of SSLG - BARMM (Bangsamoro Autonomous Region)', 'RFSSLG President', 'user'),
+      ('region4a@signflow.gov.ph', 'nfsslg-r4a', 'RFSSLG President - Region 4A (CALABARZON)', 'Regional Federation of SSLG - Region 4A (CALABARZON)', 'RFSSLG President', 'user'),
+      ('region4b@signflow.gov.ph', 'nfsslg-r4b', 'RFSSLG President - Region 4B (MIMAROPA)', 'Regional Federation of SSLG - Region 4B (MIMAROPA)', 'RFSSLG President', 'user'),
+      ('region1@signflow.gov.ph', 'nfsslg-r1', 'RFSSLG President - Region 1 (Ilocos Region)', 'Regional Federation of SSLG - Region 1 (Ilocos Region)', 'RFSSLG President', 'user'),
+      ('region2@signflow.gov.ph', 'nfsslg-r2', 'RFSSLG President - Region 2 (Cagayan Valley)', 'Regional Federation of SSLG - Region 2 (Cagayan Valley)', 'RFSSLG President', 'user'),
+      ('region3@signflow.gov.ph', 'nfsslg-r3', 'RFSSLG President - Region 3 (Central Luzon)', 'Regional Federation of SSLG - Region 3 (Central Luzon)', 'RFSSLG President', 'user'),
+      ('region5@signflow.gov.ph', 'nfsslg-r5', 'RFSSLG President - Region 5 (Bicol Region)', 'Regional Federation of SSLG - Region 5 (Bicol Region)', 'RFSSLG President', 'user'),
+      ('region6@signflow.gov.ph', 'nfsslg-r6', 'RFSSLG President - Region 6 (Western Visayas)', 'Regional Federation of SSLG - Region 6 (Western Visayas)', 'RFSSLG President', 'user'),
+      ('region7@signflow.gov.ph', 'nfsslg-r7', 'RFSSLG President - Region 7 (Central Visayas)', 'Regional Federation of SSLG - Region 7 (Central Visayas)', 'RFSSLG President', 'user'),
+      ('region8@signflow.gov.ph', 'nfsslg-r8', 'RFSSLG President - Region 8 (Eastern Visayas)', 'Regional Federation of SSLG - Region 8 (Eastern Visayas)', 'RFSSLG President', 'user'),
+      ('region9@signflow.gov.ph', 'nfsslg-r9', 'RFSSLG President - Region 9 (Zamboanga Peninsula)', 'Regional Federation of SSLG - Region 9 (Zamboanga Peninsula)', 'RFSSLG President', 'user'),
+      ('region10@signflow.gov.ph', 'nfsslg-r10', 'RFSSLG President - Region 10 (Northern Mindanao)', 'Regional Federation of SSLG - Region 10 (Northern Mindanao)', 'RFSSLG President', 'user'),
+      ('region11@signflow.gov.ph', 'nfsslg-r11', 'RFSSLG President - Region 11 (Davao Region)', 'Regional Federation of SSLG - Region 11 (Davao Region)', 'RFSSLG President', 'user'),
+      ('region12@signflow.gov.ph', 'nfsslg-r12', 'RFSSLG President - Region 12 (SOCCSKSARGEN)', 'Regional Federation of SSLG - Region 12 (SOCCSKSARGEN)', 'RFSSLG President', 'user'),
+      ('region13@signflow.gov.ph', 'nfsslg-r13', 'RFSSLG President - Region 13 (Caraga Administrative Region)', 'Regional Federation of SSLG - Region 13 (Caraga Administrative Region)', 'RFSSLG President', 'user')
+    ) as t(email, username, full_name, department, position, role)
+  loop
+    if not exists (select 1 from auth.users where email = acct.email) then
+      new_uid := gen_random_uuid();
+      insert into auth.users (
+        instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
+        raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, recovery_token
+      ) values (
+        '00000000-0000-0000-0000-000000000000',
+        new_uid,
+        'authenticated',
+        'authenticated',
+        acct.email,
+        crypt('adminpassword', gen_salt('bf')),
+        now(),
+        '{"provider":"email","providers":["email"]}'::jsonb,
+        jsonb_build_object(
+          'full_name', acct.full_name,
+          'username', acct.username,
+          'department', acct.department,
+          'position', acct.position,
+          'role', acct.role,
+          'status', 'active'
+        ),
+        now(),
+        now(),
+        '',
+        ''
+      );
+
+      insert into auth.identities (
+        id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at
+      ) values (
+        gen_random_uuid(),
+        new_uid,
+        jsonb_build_object('sub', new_uid::text, 'email', acct.email),
+        'email',
+        new_uid::text,
+        now(),
+        now(),
+        now()
+      );
+
+      update public.profiles
+      set username = acct.username,
+          full_name = acct.full_name,
+          department = acct.department,
+          position = acct.position,
+          role = acct.role,
+          status = 'active'
+      where id = new_uid;
+    end if;
+  end loop;
+end $$;
+

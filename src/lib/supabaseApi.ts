@@ -70,19 +70,79 @@ async function computeSha256Hex(input: string): Promise<string> {
   return hash.toString(16).padStart(64, 'a');
 }
 
+const NFSSLG_ACCOUNT_MAP: Record<
+  string,
+  { email: string; username: string; fullName: string; department: string; position: string; role: 'admin' | 'user' }
+> = {
+  'centraloffice@signflow.gov.ph': {
+    email: 'centraloffice@signflow.gov.ph',
+    username: 'nfsslg-yfd',
+    fullName: 'Central Office - Youth Formation Division (YFD)',
+    department: 'National Federation of SSLG Central Office (YFD)',
+    position: 'Central Office Administrator',
+    role: 'admin',
+  },
+  'ncr@signflow.gov.ph': { email: 'ncr@signflow.gov.ph', username: 'nfsslg-ncr', fullName: 'RFSSLG President - NCR (National Capital Region)', department: 'Regional Federation of SSLG - NCR (National Capital Region)', position: 'RFSSLG President', role: 'user' },
+  'car@signflow.gov.ph': { email: 'car@signflow.gov.ph', username: 'nfsslg-car', fullName: 'RFSSLG President - CAR (Cordillera Administrative Region)', department: 'Regional Federation of SSLG - CAR (Cordillera Administrative Region)', position: 'RFSSLG President', role: 'user' },
+  'nir@signflow.gov.ph': { email: 'nir@signflow.gov.ph', username: 'nfsslg-nir', fullName: 'RFSSLG President - NIR (Negros Island Region)', department: 'Regional Federation of SSLG - NIR (Negros Island Region)', position: 'RFSSLG President', role: 'user' },
+  'barmm@signflow.gov.ph': { email: 'barmm@signflow.gov.ph', username: 'nfsslg-barmm', fullName: 'RFSSLG President - BARMM (Bangsamoro Autonomous Region)', department: 'Regional Federation of SSLG - BARMM (Bangsamoro Autonomous Region)', position: 'RFSSLG President', role: 'user' },
+  'region4a@signflow.gov.ph': { email: 'region4a@signflow.gov.ph', username: 'nfsslg-r4a', fullName: 'RFSSLG President - Region 4A (CALABARZON)', department: 'Regional Federation of SSLG - Region 4A (CALABARZON)', position: 'RFSSLG President', role: 'user' },
+  'region4b@signflow.gov.ph': { email: 'region4b@signflow.gov.ph', username: 'nfsslg-r4b', fullName: 'RFSSLG President - Region 4B (MIMAROPA)', department: 'Regional Federation of SSLG - Region 4B (MIMAROPA)', position: 'RFSSLG President', role: 'user' },
+  'region1@signflow.gov.ph': { email: 'region1@signflow.gov.ph', username: 'nfsslg-r1', fullName: 'RFSSLG President - Region 1 (Ilocos Region)', department: 'Regional Federation of SSLG - Region 1 (Ilocos Region)', position: 'RFSSLG President', role: 'user' },
+  'region2@signflow.gov.ph': { email: 'region2@signflow.gov.ph', username: 'nfsslg-r2', fullName: 'RFSSLG President - Region 2 (Cagayan Valley)', department: 'Regional Federation of SSLG - Region 2 (Cagayan Valley)', position: 'RFSSLG President', role: 'user' },
+  'region3@signflow.gov.ph': { email: 'region3@signflow.gov.ph', username: 'nfsslg-r3', fullName: 'RFSSLG President - Region 3 (Central Luzon)', department: 'Regional Federation of SSLG - Region 3 (Central Luzon)', position: 'RFSSLG President', role: 'user' },
+  'region5@signflow.gov.ph': { email: 'region5@signflow.gov.ph', username: 'nfsslg-r5', fullName: 'RFSSLG President - Region 5 (Bicol Region)', department: 'Regional Federation of SSLG - Region 5 (Bicol Region)', position: 'RFSSLG President', role: 'user' },
+  'region6@signflow.gov.ph': { email: 'region6@signflow.gov.ph', username: 'nfsslg-r6', fullName: 'RFSSLG President - Region 6 (Western Visayas)', department: 'Regional Federation of SSLG - Region 6 (Western Visayas)', position: 'RFSSLG President', role: 'user' },
+  'region7@signflow.gov.ph': { email: 'region7@signflow.gov.ph', username: 'nfsslg-r7', fullName: 'RFSSLG President - Region 7 (Central Visayas)', department: 'Regional Federation of SSLG - Region 7 (Central Visayas)', position: 'RFSSLG President', role: 'user' },
+  'region8@signflow.gov.ph': { email: 'region8@signflow.gov.ph', username: 'nfsslg-r8', fullName: 'RFSSLG President - Region 8 (Eastern Visayas)', department: 'Regional Federation of SSLG - Region 8 (Eastern Visayas)', position: 'RFSSLG President', role: 'user' },
+  'region9@signflow.gov.ph': { email: 'region9@signflow.gov.ph', username: 'nfsslg-r9', fullName: 'RFSSLG President - Region 9 (Zamboanga Peninsula)', department: 'Regional Federation of SSLG - Region 9 (Zamboanga Peninsula)', position: 'RFSSLG President', role: 'user' },
+  'region10@signflow.gov.ph': { email: 'region10@signflow.gov.ph', username: 'nfsslg-r10', fullName: 'RFSSLG President - Region 10 (Northern Mindanao)', department: 'Regional Federation of SSLG - Region 10 (Northern Mindanao)', position: 'RFSSLG President', role: 'user' },
+  'region11@signflow.gov.ph': { email: 'region11@signflow.gov.ph', username: 'nfsslg-r11', fullName: 'RFSSLG President - Region 11 (Davao Region)', department: 'Regional Federation of SSLG - Region 11 (Davao Region)', position: 'RFSSLG President', role: 'user' },
+  'region12@signflow.gov.ph': { email: 'region12@signflow.gov.ph', username: 'nfsslg-r12', fullName: 'RFSSLG President - Region 12 (SOCCSKSARGEN)', department: 'Regional Federation of SSLG - Region 12 (SOCCSKSARGEN)', position: 'RFSSLG President', role: 'user' },
+  'region13@signflow.gov.ph': { email: 'region13@signflow.gov.ph', username: 'nfsslg-r13', fullName: 'RFSSLG President - Region 13 (Caraga Administrative Region)', department: 'Regional Federation of SSLG - Region 13 (Caraga Administrative Region)', position: 'RFSSLG President', role: 'user' },
+};
+
+function resolveIdentifierToEmail(identifier: string): string {
+  const raw = (identifier || '').trim().toLowerCase();
+  if (!raw) return '';
+  if (raw.includes('@')) return raw;
+
+  const clean = raw.replace(/[\s_\-\.]+/g, '');
+  if (['nfsslgyfd', 'yfd', 'centraloffice', 'central', 'co', 'secretariat', 'admin'].includes(clean)) {
+    return 'centraloffice@signflow.gov.ph';
+  }
+  if (['nfsslgncr', 'ncr'].includes(clean)) return 'ncr@signflow.gov.ph';
+  if (['nfsslgcar', 'car'].includes(clean)) return 'car@signflow.gov.ph';
+  if (['nfsslgnir', 'nir'].includes(clean)) return 'nir@signflow.gov.ph';
+  if (['nfsslgbarmm', 'barmm'].includes(clean)) return 'barmm@signflow.gov.ph';
+  if (['nfsslgr4a', 'r4a', 'region4a', 'calabarzon'].includes(clean)) return 'region4a@signflow.gov.ph';
+  if (['nfsslgr4b', 'r4b', 'region4b', 'mimaropa'].includes(clean)) return 'region4b@signflow.gov.ph';
+
+  const rMatch = clean.match(/^(?:nfsslg)?(?:r|region)(\d{1,2})$/);
+  if (rMatch) {
+    const num = Number(rMatch[1]);
+    if (num >= 1 && num <= 13) {
+      return `region${num}@signflow.gov.ph`;
+    }
+  }
+
+  return '';
+}
+
 function mapSupabaseUser(authUser: SupabaseAuthUser, profile?: any): User {
   const meta = (authUser.user_metadata || {}) as Record<string, any>;
-  const email = profile?.email || authUser.email || '';
+  const email = (profile?.email || authUser.email || '').toLowerCase();
+  const preset = NFSSLG_ACCOUNT_MAP[email];
   const fallbackName = email ? email.split('@')[0] : 'SignFlow User';
 
   return {
     id: authUser.id,
-    email,
-    fullName: profile?.full_name || meta.full_name || fallbackName,
-    username: profile?.username || meta.username || fallbackName,
-    department: profile?.department || meta.department || 'National Federation of SSLG',
-    position: profile?.position || meta.position || 'Authorized Signatory',
-    role: (profile?.role || meta.role || 'user') as 'admin' | 'user',
+    email: profile?.email || authUser.email || '',
+    fullName: profile?.full_name || meta.full_name || preset?.fullName || fallbackName,
+    username: profile?.username || meta.username || preset?.username || fallbackName,
+    department: profile?.department || meta.department || preset?.department || 'National Federation of SSLG',
+    position: profile?.position || meta.position || preset?.position || 'Authorized Signatory',
+    role: (profile?.role || meta.role || preset?.role || 'user') as 'admin' | 'user',
     status: (profile?.status || meta.status || 'active') as 'active' | 'pending' | 'disabled',
     signaturePngUrl: profile?.signature_png_url || meta.signature_png_url || undefined,
     createdAt: profile?.created_at || authUser.created_at || new Date().toISOString(),
@@ -590,10 +650,15 @@ export const supabaseApi = {
     return isSupabaseConfigured;
   },
 
-  async login(email: string, password: string): Promise<{ user: User; token: string }> {
+  async login(identifier: string, password: string): Promise<{ user: User; token: string }> {
     const client = requireSupabase();
+    const resolvedEmail = resolveIdentifierToEmail(identifier);
+    if (!resolvedEmail) {
+      throw new Error('Invalid username or region identifier. (e.g. nfsslg-yfd, nfsslg-ncr, nfsslg-r11)');
+    }
+
     const { data, error } = await client.auth.signInWithPassword({
-      email: email.trim(),
+      email: resolvedEmail,
       password,
     });
 
@@ -601,59 +666,11 @@ export const supabaseApi = {
       throw new Error(error.message);
     }
     if (!data.user || !data.session) {
-      throw new Error('Authentication failed. Please confirm your email and password.');
+      throw new Error('Authentication failed. Please check your username and password.');
     }
 
     const user = await fetchOrSyncProfile(data.user);
     return { user, token: data.session.access_token };
-  },
-
-  async register(userData: {
-    fullName: string;
-    email: string;
-    password: string;
-    department: string;
-    position: string;
-    username?: string;
-  }): Promise<{ user: User; requiresApproval: boolean; sessionActive: boolean; message: string }> {
-    const client = requireSupabase();
-    const username = userData.username || userData.email.split('@')[0];
-
-    const { data, error } = await client.auth.signUp({
-      email: userData.email.trim(),
-      password: userData.password,
-      options: {
-        data: {
-          full_name: userData.fullName.trim(),
-          username,
-          department: userData.department.trim() || 'National Federation of SSLG',
-          position: userData.position.trim() || 'Authorized Signatory',
-          role: 'user',
-          status: 'active',
-        },
-      },
-    });
-
-    if (error) {
-      throw new Error(error.message);
-    }
-    if (!data.user) {
-      throw new Error('Sign up did not return a user record.');
-    }
-
-    const mapped = data.session
-      ? await fetchOrSyncProfile(data.user)
-      : mapSupabaseUser(data.user);
-
-    const sessionActive = Boolean(data.session);
-    return {
-      user: mapped,
-      sessionActive,
-      requiresApproval: !sessionActive,
-      message: sessionActive
-        ? 'Account created and signed in.'
-        : 'Account created! Please check your email to confirm your address before signing in.',
-    };
   },
 
   async logout(): Promise<void> {

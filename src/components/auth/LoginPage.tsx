@@ -2,77 +2,41 @@ import React, { useState } from 'react';
 import {
   Shield,
   Lock,
-  Mail,
-  User as UserIcon,
-  Building,
-  Briefcase,
+  User,
   AlertCircle,
-  CheckCircle2,
   Eye,
   EyeOff,
   ArrowRight,
-  UserPlus,
-  LogIn,
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { isSupabaseConfigured } from '../../lib/supabaseClient';
 
 export const LoginPage: React.FC = () => {
-  const { login, register } = useAuth();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-
-  const [email, setEmail] = useState('');
+  const { login } = useAuth();
+  const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [department, setDepartment] = useState('National Federation of SSLG');
-  const [position, setPosition] = useState('Authorized Signatory');
-
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMsg, setSuccessMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     e.stopPropagation();
 
+    if (!identifier.trim()) {
+      setError('Please enter your username (e.g. nfsslg-yfd, nfsslg-ncr, nfsslg-r11, or region name).');
+      return;
+    }
+    if (!password) {
+      setError('Please enter your account password.');
+      return;
+    }
+
     setError(null);
-    setSuccessMsg(null);
-
-    if (!email.trim() || !email.includes('@')) {
-      setError('Please enter a valid email address.');
-      return;
-    }
-
-    if (!password || password.length < 6) {
-      setError('Password must be at least 6 characters.');
-      return;
-    }
-
-    if (mode === 'signup' && !fullName.trim()) {
-      setError('Please enter your full name.');
-      return;
-    }
-
     setLoading(true);
     try {
-      if (mode === 'signin') {
-        await login(email.trim(), password);
-      } else {
-        const res = await register({
-          fullName: fullName.trim(),
-          email: email.trim(),
-          password,
-          department: department.trim() || 'National Federation of SSLG',
-          position: position.trim() || 'Authorized Signatory',
-        });
-        if (!res.sessionActive) {
-          setSuccessMsg(res.message);
-          setMode('signin');
-        }
-      }
+      await login(identifier.trim(), password);
     } catch (err: any) {
-      setError(err.message || 'Authentication failed. Please check your credentials.');
+      setError(err.message || 'Authentication failed. Please verify your identifier and password.');
     } finally {
       setLoading(false);
     }
@@ -81,7 +45,7 @@ export const LoginPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 flex flex-col justify-center items-center p-4 selection:bg-blue-600 selection:text-white">
       <div className="w-full max-w-4xl bg-white rounded-3xl shadow-2xl border border-slate-200/80 overflow-hidden flex flex-col md:flex-row">
-        {/* Left Column: Institutional Brand */}
+        {/* Left Column: Institutional Brand & Welcome */}
         <div className="md:w-5/12 bg-gradient-to-b from-blue-900 via-slate-900 to-slate-950 p-7 sm:p-8 text-white flex flex-col justify-between">
           <div>
             <div className="flex items-center space-x-3.5 mb-6">
@@ -100,12 +64,11 @@ export const LoginPage: React.FC = () => {
 
             <div className="space-y-4">
               <h2 className="text-2xl font-black leading-snug">
-                Document Approval &amp; Digital Signature Portal
+                National Federation of SSLG Document Approval &amp; Digital Signature Portal
               </h2>
               <p className="text-xs text-slate-300 leading-relaxed">
-                Upload PDFs, apply transparent PNG digital signatures with automatic background
-                removal, and generate cryptographically merged final PDFs with persistent cloud
-                storage.
+                Centralized, tamper-evident document workflow coordinating the Central Office
+                and RFSSLG Presidents across Regions 1 to 13, Region 4A, Region 4B, NCR, CAR, NIR, and BARMM.
               </p>
             </div>
           </div>
@@ -113,76 +76,26 @@ export const LoginPage: React.FC = () => {
           <div className="mt-8 pt-6 border-t border-slate-800 space-y-2 text-xs text-slate-400">
             <div className="flex items-center space-x-2 text-emerald-400 font-semibold text-[11px]">
               <Shield className="w-4 h-4" />
-              <span>Encrypted Authentication &amp; Cloud Document Storage</span>
+              <span>SHA-256 Digital Verification Seal</span>
             </div>
             <p className="text-[11px] leading-relaxed text-slate-400">
-              Sign in with your verified email and password or register a new signatory account to
-              access and sign documents.
+              Access is restricted to authorized NFSSLG Central Office and RFSSLG President accounts.
+              Public registration is disabled.
             </p>
           </div>
         </div>
 
-        {/* Right Column: Supabase Email / Password Auth Form */}
+        {/* Right Column: Secure Username/Identifier & Password Login Form */}
         <div className="md:w-7/12 p-6 sm:p-8 bg-slate-50/50 flex flex-col justify-between">
           <div>
-            {/* Mode Switch Tabs */}
-            <div className="flex items-center space-x-2 bg-slate-200/70 p-1 rounded-xl mb-6">
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('signin');
-                  setError(null);
-                  setSuccessMsg(null);
-                }}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center space-x-1.5 transition-all ${
-                  mode === 'signin'
-                    ? 'bg-white text-blue-950 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <LogIn className="w-3.5 h-3.5" />
-                <span>Sign In</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setMode('signup');
-                  setError(null);
-                  setSuccessMsg(null);
-                }}
-                className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold flex items-center justify-center space-x-1.5 transition-all ${
-                  mode === 'signup'
-                    ? 'bg-white text-blue-950 shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Create Account</span>
-              </button>
-            </div>
-
-            <div className="mb-5">
+            <div className="mb-6">
               <h3 className="text-xl font-extrabold text-slate-900 tracking-tight">
-                {mode === 'signin' ? 'Email & Password Sign In' : 'Create Signatory Account'}
+                Account Sign In
               </h3>
               <p className="text-xs text-slate-500 mt-1">
-                {mode === 'signin'
-                  ? 'Sign in with your email and password to manage and sign PDFs.'
-                  : 'Register with your email and password to begin uploading and signing documents.'}
+                Enter your assigned RFSSLG President or Central Office credentials to access your document workspace
               </p>
             </div>
-
-            {!isSupabaseConfigured && (
-              <div className="mb-4 p-3.5 bg-amber-50 border border-amber-200 text-amber-900 text-xs rounded-xl flex items-start space-x-2.5">
-                <AlertCircle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
-                <span>
-                  Supabase environment variables (<code>VITE_SUPABASE_URL</code> and{' '}
-                  <code>VITE_SUPABASE_ANON_KEY</code>) are not configured yet. Set them in your
-                  deployment environment to enable authentication.
-                </span>
-              </div>
-            )}
 
             {error && (
               <div className="mb-4 p-3.5 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center space-x-2.5">
@@ -191,101 +104,40 @@ export const LoginPage: React.FC = () => {
               </div>
             )}
 
-            {successMsg && (
-              <div className="mb-4 p-3.5 bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs rounded-xl flex items-center space-x-2.5">
-                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-                <span>{successMsg}</span>
-              </div>
-            )}
-
             <form action="#" onSubmit={handleSubmit} noValidate className="space-y-4">
-              {mode === 'signup' && (
-                <>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                      Full Name
-                    </label>
-                    <div className="relative">
-                      <UserIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                      <input
-                        type="text"
-                        required
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder="e.g. Juan Dela Cruz"
-                        className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent shadow-2xs"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                        Department / Region
-                      </label>
-                      <div className="relative">
-                        <Building className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                        <input
-                          type="text"
-                          value={department}
-                          onChange={(e) => setDepartment(e.target.value)}
-                          placeholder="e.g. Region NCR"
-                          className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent shadow-2xs"
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                        Position / Title
-                      </label>
-                      <div className="relative">
-                        <Briefcase className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
-                        <input
-                          type="text"
-                          value={position}
-                          onChange={(e) => setPosition(e.target.value)}
-                          placeholder="e.g. RFSSLG President"
-                          className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent shadow-2xs"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </>
-              )}
-
+              {/* Identifier Input */}
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                  Email Address
+                  Username / Region Identifier
                 </label>
                 <div className="relative">
-                  <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
+                  <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                   <input
-                    type="email"
+                    type="text"
                     required
-                    autoComplete="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="name@example.com"
+                    value={identifier}
+                    onChange={(e) => setIdentifier(e.target.value)}
+                    placeholder="e.g. nfsslg-yfd, nfsslg-ncr, nfsslg-r11, nfsslg-nir, or email"
                     className="w-full pl-10 pr-3 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent shadow-2xs"
                   />
                 </div>
               </div>
 
+              {/* Password Input */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5 uppercase tracking-wider">
-                  Password
-                </label>
+                <div className="flex justify-between items-center mb-1.5">
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Password
+                  </label>
+                </div>
                 <div className="relative">
                   <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-3" />
                   <input
                     type={showPassword ? 'text' : 'password'}
                     required
-                    minLength={6}
-                    autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    placeholder="Minimum 6 characters"
+                    placeholder="••••••••••••"
                     className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-900 focus:border-transparent shadow-2xs"
                   />
                   <button
@@ -299,16 +151,17 @@ export const LoginPage: React.FC = () => {
                 </div>
               </div>
 
+              {/* Submit Button */}
               <button
                 type="submit"
                 disabled={loading}
                 className="w-full py-3 bg-blue-900 hover:bg-blue-950 text-white rounded-xl text-xs font-bold shadow-md transition-colors flex items-center justify-center space-x-2 disabled:opacity-50"
               >
                 {loading ? (
-                  <span>{mode === 'signin' ? 'Signing In...' : 'Creating Account...'}</span>
+                  <span>Authenticating...</span>
                 ) : (
                   <>
-                    <span>{mode === 'signin' ? 'Sign In with Email' : 'Create Account'}</span>
+                    <span>Sign In to Regional Workspace</span>
                     <ArrowRight className="w-4 h-4" />
                   </>
                 )}
