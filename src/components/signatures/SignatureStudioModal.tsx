@@ -12,6 +12,7 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { apiUploadSignaturePng } from '../../lib/api';
+import { processSignatureImageToTransparentPng } from '../../lib/signatureProcessor';
 
 interface SignatureStudioModalProps {
   isOpen: boolean;
@@ -139,43 +140,19 @@ export const SignatureStudioModal: React.FC<SignatureStudioModalProps> = ({
     setPreviewDataUrl(url);
   };
 
-  // Upload handler with transparent background processing
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Upload handler with transparent background processing (PNG, JPG, WEBP)
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        // Clean and ensure transparency if background is white
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = img.width;
-        tempCanvas.height = img.height;
-        const ctx = tempCanvas.getContext('2d');
-        if (!ctx) return;
-
-        ctx.drawImage(img, 0, 0);
-        const imgData = ctx.getImageData(0, 0, img.width, img.height);
-        const data = imgData.data;
-
-        // If white or near-white background, convert to transparent
-        for (let i = 0; i < data.length; i += 4) {
-          const r = data[i];
-          const g = data[i + 1];
-          const b = data[i + 2];
-          if (r > 235 && g > 235 && b > 235) {
-            data[i + 3] = 0; // set alpha to 0
-          }
-        }
-        ctx.putImageData(imgData, 0, 0);
-        const cleanPng = tempCanvas.toDataURL('image/png');
-        setUploadedDataUrl(cleanPng);
-        setPreviewDataUrl(cleanPng);
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
+    setSaveError(null);
+    try {
+      const processed = await processSignatureImageToTransparentPng(file);
+      setUploadedDataUrl(processed.dataUrl);
+      setPreviewDataUrl(processed.dataUrl);
+    } catch (err: any) {
+      setSaveError(err.message || 'Failed to process signature image.');
+    }
   };
 
   const handleSaveSignature = async () => {
@@ -438,15 +415,15 @@ export const SignatureStudioModal: React.FC<SignatureStudioModalProps> = ({
               <label className="border-2 border-dashed border-slate-300 rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer hover:border-blue-700 hover:bg-blue-50/20 transition-colors">
                 <Upload className="w-8 h-8 text-blue-900 mb-2" />
                 <span className="text-sm font-semibold text-slate-800">
-                  Choose Transparent PNG Signature
+                  Upload Signature Image (PNG, JPG, or WEBP)
                 </span>
                 <span className="text-xs text-slate-500 mt-1 text-center max-w-sm">
-                  Upload a crisp PNG file. If your image has a white paper background, NFSSLG SignFlow will
-                  automatically convert it to transparent!
+                  Upload a PNG, JPG, or WEBP signature photo. Any white paper background will be
+                  automatically removed on canvas and exported as a transparent PNG.
                 </span>
                 <input
                   type="file"
-                  accept="image/png,image/jpeg"
+                  accept="image/png,image/jpeg,image/webp"
                   onChange={handleFileUpload}
                   className="hidden"
                 />

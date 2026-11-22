@@ -144,7 +144,7 @@ export const DocumentsApprovalView: React.FC<DocumentsApprovalViewProps> = ({
 
             const signedCount = doc.signatories.filter((s) => s.status === 'signed').length;
             const totalCount = doc.signatories.length;
-            const progressPercent = Math.round((signedCount / totalCount) * 100);
+            const progressPercent = totalCount > 0 ? Math.round((signedCount / totalCount) * 100) : (doc.signatures.length > 0 ? 100 : 0);
 
             const isOverdue =
               doc.deadline && new Date(doc.deadline) < new Date() && doc.status !== 'completed';

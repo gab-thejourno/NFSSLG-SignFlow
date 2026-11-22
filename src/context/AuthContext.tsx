@@ -4,229 +4,29 @@ import {
   apiGetMe,
   apiLogin,
   apiRegister,
-  apiSwitchUser,
+  apiLogout,
   apiUpdateProfile,
   apiChangePassword,
-  setStoredToken,
   apiGetNotifications,
   apiMarkNotificationRead,
   apiMarkAllNotificationsRead,
   subscribeToRealtime,
 } from '../lib/api';
-
-export interface RegionalAccount {
-  id: string;
-  name: string;
-  roleTitle: string;
-  department: string;
-  email: string;
-  code: string;
-  role: 'admin' | 'user';
-  status: 'active' | 'pending';
-}
-
-export const REGIONAL_ACCOUNTS: RegionalAccount[] = [
-  {
-    id: 'usr-centraloffice',
-    name: 'Central Office - Youth Formation Division (YFD)',
-    roleTitle: 'National Federation of SSLG Central Office',
-    department: 'National Federation of SSLG Central Office (YFD)',
-    email: 'centraloffice@signflow.gov.ph',
-    code: 'nfsslg-yfd',
-    role: 'admin',
-    status: 'active',
-  },
-  {
-    id: 'usr-ncr',
-    name: 'RFSSLG President - NCR',
-    roleTitle: 'National Capital Region',
-    department: 'Regional Federation of SSLG - NCR (National Capital Region)',
-    email: 'ncr@signflow.gov.ph',
-    code: 'nfsslg-ncr',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-car',
-    name: 'RFSSLG President - CAR',
-    roleTitle: 'Cordillera Administrative Region',
-    department: 'Regional Federation of SSLG - CAR (Cordillera Administrative Region)',
-    email: 'car@signflow.gov.ph',
-    code: 'nfsslg-car',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region1',
-    name: 'RFSSLG President - Region 1',
-    roleTitle: 'Ilocos Region',
-    department: 'Regional Federation of SSLG - Region 1 (Ilocos Region)',
-    email: 'region1@signflow.gov.ph',
-    code: 'nfsslg-r1',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region2',
-    name: 'RFSSLG President - Region 2',
-    roleTitle: 'Cagayan Valley',
-    department: 'Regional Federation of SSLG - Region 2 (Cagayan Valley)',
-    email: 'region2@signflow.gov.ph',
-    code: 'nfsslg-r2',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region3',
-    name: 'RFSSLG President - Region 3',
-    roleTitle: 'Central Luzon',
-    department: 'Regional Federation of SSLG - Region 3 (Central Luzon)',
-    email: 'region3@signflow.gov.ph',
-    code: 'nfsslg-r3',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region4a',
-    name: 'RFSSLG President - Region 4A',
-    roleTitle: 'CALABARZON',
-    department: 'Regional Federation of SSLG - Region 4A (CALABARZON)',
-    email: 'region4a@signflow.gov.ph',
-    code: 'nfsslg-r4a',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region4b',
-    name: 'RFSSLG President - Region 4B',
-    roleTitle: 'MIMAROPA',
-    department: 'Regional Federation of SSLG - Region 4B (MIMAROPA)',
-    email: 'region4b@signflow.gov.ph',
-    code: 'nfsslg-r4b',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region5',
-    name: 'RFSSLG President - Region 5',
-    roleTitle: 'Bicol Region',
-    department: 'Regional Federation of SSLG - Region 5 (Bicol Region)',
-    email: 'region5@signflow.gov.ph',
-    code: 'nfsslg-r5',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region6',
-    name: 'RFSSLG President - Region 6',
-    roleTitle: 'Western Visayas',
-    department: 'Regional Federation of SSLG - Region 6 (Western Visayas)',
-    email: 'region6@signflow.gov.ph',
-    code: 'nfsslg-r6',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region7',
-    name: 'RFSSLG President - Region 7',
-    roleTitle: 'Central Visayas',
-    department: 'Regional Federation of SSLG - Region 7 (Central Visayas)',
-    email: 'region7@signflow.gov.ph',
-    code: 'nfsslg-r7',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-nir',
-    name: 'RFSSLG President - NIR',
-    roleTitle: 'Negros Island Region',
-    department: 'Regional Federation of SSLG - NIR (Negros Island Region)',
-    email: 'nir@signflow.gov.ph',
-    code: 'nfsslg-nir',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region8',
-    name: 'RFSSLG President - Region 8',
-    roleTitle: 'Eastern Visayas',
-    department: 'Regional Federation of SSLG - Region 8 (Eastern Visayas)',
-    email: 'region8@signflow.gov.ph',
-    code: 'nfsslg-r8',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region9',
-    name: 'RFSSLG President - Region 9',
-    roleTitle: 'Zamboanga Peninsula',
-    department: 'Regional Federation of SSLG - Region 9 (Zamboanga Peninsula)',
-    email: 'region9@signflow.gov.ph',
-    code: 'nfsslg-r9',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region10',
-    name: 'RFSSLG President - Region 10',
-    roleTitle: 'Northern Mindanao',
-    department: 'Regional Federation of SSLG - Region 10 (Northern Mindanao)',
-    email: 'region10@signflow.gov.ph',
-    code: 'nfsslg-r10',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region11',
-    name: 'RFSSLG President - Region 11',
-    roleTitle: 'Davao Region',
-    department: 'Regional Federation of SSLG - Region 11 (Davao Region)',
-    email: 'region11@signflow.gov.ph',
-    code: 'nfsslg-r11',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region12',
-    name: 'RFSSLG President - Region 12',
-    roleTitle: 'SOCCSKSARGEN',
-    department: 'Regional Federation of SSLG - Region 12 (SOCCSKSARGEN)',
-    email: 'region12@signflow.gov.ph',
-    code: 'nfsslg-r12',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-region13',
-    name: 'RFSSLG President - Region 13',
-    roleTitle: 'Caraga Administrative Region',
-    department: 'Regional Federation of SSLG - Region 13 (Caraga Administrative Region)',
-    email: 'region13@signflow.gov.ph',
-    code: 'nfsslg-r13',
-    role: 'user',
-    status: 'active',
-  },
-  {
-    id: 'usr-barmm',
-    name: 'RFSSLG President - BARMM',
-    roleTitle: 'Bangsamoro Autonomous Region',
-    department: 'Regional Federation of SSLG - BARMM (Bangsamoro Autonomous Region)',
-    email: 'barmm@signflow.gov.ph',
-    code: 'nfsslg-barmm',
-    role: 'user',
-    status: 'active',
-  },
-];
-
-export const DEMO_ACCOUNTS = REGIONAL_ACCOUNTS;
+import { supabase } from '../lib/supabaseClient';
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
-  login: (identifier: string, pass: string) => Promise<void>;
-  register: (data: any) => Promise<{ requiresApproval: boolean; message: string }>;
-  logout: () => void;
-  switchUser: (userId: string) => Promise<void>;
+  login: (email: string, pass: string) => Promise<void>;
+  register: (data: {
+    fullName: string;
+    email: string;
+    password: string;
+    department: string;
+    position: string;
+    username?: string;
+  }) => Promise<{ requiresApproval: boolean; sessionActive: boolean; message: string }>;
+  logout: () => Promise<void>;
   updateProfile: (data: Partial<User>) => Promise<void>;
   changePassword: (currentPass: string, newPass: string) => Promise<{ success: boolean; message: string }>;
   notifications: AppNotification[];
@@ -248,7 +48,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const data = await apiGetMe();
       setUser(data.user);
     } catch {
-      // If no valid session, start on login page
       setUser(null);
     } finally {
       setLoading(false);
@@ -267,6 +66,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     fetchCurrentUser();
+
+    if (!supabase) return;
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.user) {
+        apiGetMe()
+          .then((res) => setUser(res.user))
+          .catch(() => setUser(null));
+      } else {
+        setUser(null);
+        setNotifications([]);
+      }
+    });
+
+    return () => {
+      subscription.unsubscribe();
+    };
   }, []);
 
   useEffect(() => {
@@ -277,7 +95,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           evt.type === 'SIGNATURE_ADDED' ||
           evt.type === 'DOCUMENT_CREATED' ||
           evt.type === 'USER_UPDATED' ||
-          evt.type === 'FIELDS_UPDATED'
+          evt.type === 'FIELDS_UPDATED' ||
+          evt.type === 'DOCUMENT_UPDATED'
         ) {
           loadNotifications();
         }
@@ -286,29 +105,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   }, [user?.id]);
 
-  const login = async (identifier: string, pass: string) => {
-    const res = await apiLogin(identifier, pass);
+  const login = async (email: string, pass: string) => {
+    const res = await apiLogin(email, pass);
     setUser(res.user);
     await loadNotifications();
   };
 
-  const register = async (data: any) => {
-    return apiRegister(data);
-  };
-
-  const logout = () => {
-    setStoredToken(null);
-    setUser(null);
-  };
-
-  const switchUser = async (userId: string) => {
-    setLoading(true);
-    try {
-      const res = await apiSwitchUser(userId);
+  const register = async (data: {
+    fullName: string;
+    email: string;
+    password: string;
+    department: string;
+    position: string;
+    username?: string;
+  }) => {
+    const res = await apiRegister(data);
+    if (res.sessionActive) {
       setUser(res.user);
-    } finally {
-      setLoading(false);
     }
+    return {
+      requiresApproval: res.requiresApproval,
+      sessionActive: res.sessionActive,
+      message: res.message,
+    };
+  };
+
+  const logout = async () => {
+    await apiLogout();
+    setUser(null);
+    setNotifications([]);
   };
 
   const updateProfile = async (data: Partial<User>) => {
@@ -317,8 +142,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const changePassword = async (currentPass: string, newPass: string) => {
-    const res = await apiChangePassword(currentPass, newPass);
-    return res;
+    return apiChangePassword(currentPass, newPass);
   };
 
   const handleMarkNotificationRead = async (id: string) => {
@@ -343,7 +167,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         login,
         register,
         logout,
-        switchUser,
         updateProfile,
         changePassword,
         notifications,

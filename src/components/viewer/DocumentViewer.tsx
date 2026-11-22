@@ -25,6 +25,7 @@ import {
   RotateCcw,
   Stamp,
   Shield,
+  Upload,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -41,6 +42,7 @@ import {
   apiSigneePlaceField,
   subscribeToRealtime,
 } from '../../lib/api';
+import { processSignatureImageToTransparentPng } from '../../lib/signatureProcessor';
 import { SignatureStudioModal } from '../signatures/SignatureStudioModal';
 
 // Setup PDF.js worker safely via local bundled worker
@@ -87,6 +89,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   // Signing dialog state
   const [signingField, setSigningField] = useState<SignatureField | null>(null);
   const [signatureDataUrl, setSignatureDataUrl] = useState<string | null>(null);
+  const [processingSigImage, setProcessingSigImage] = useState(false);
   const [consentChecked, setConsentChecked] = useState(false);
   const [isSubmittingSignature, setIsSubmittingSignature] = useState(false);
   const [isStudioOpen, setIsStudioOpen] = useState(false);
@@ -240,13 +243,22 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   // Signatory permissions check
   const mySignatoryRecord = doc?.signatories.find((s) => s.userId === user?.id);
-  const isDocLocked = doc?.status === 'completed' || doc?.status === 'cancelled';
-  const hasMyTurnToSign =
-    mySignatoryRecord &&
-    mySignatoryRecord.status === 'pending' &&
-    !isDocLocked;
+  const isDocLocked =
+    doc?.status === 'cancelled' ||
+    doc?.status === 'rejected' ||
+    (doc?.status === 'completed' && (doc?.signatories.length || 0) > 0);
+  const hasMyTurnToSign = Boolean(
+    doc &&
+      user &&
+      !isDocLocked &&
+      (mySignatoryRecord
+        ? mySignatoryRecord.status === 'pending'
+        : doc.signatories.length === 0)
+  );
 
-  const hasAlreadySigned = mySignatoryRecord?.status === 'signed';
+  const hasAlreadySigned =
+    mySignatoryRecord?.status === 'signed' ||
+    Boolean(doc?.signatures.some((s) => s.userId === user?.id));
 
   // Signee determines where to sign: Click on page
   const handlePageClickPlaceSignature = async (e: React.MouseEvent<HTMLDivElement>) => {
@@ -300,6 +312,22 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     setSigningField(field);
     setSignatureDataUrl(user?.signaturePngUrl || null);
     setConsentChecked(false);
+  };
+
+  // Direct upload of PNG, JPG, or WEBP inside signing dialog with automatic white-background removal
+  const handleDirectSignatureImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setProcessingSigImage(true);
+    try {
+      const processed = await processSignatureImageToTransparentPng(file);
+      setSignatureDataUrl(processed.dataUrl);
+    } catch (err: any) {
+      alert(err.message || 'Could not process signature image.');
+    } finally {
+      setProcessingSigImage(false);
+      e.target.value = '';
+    }
   };
 
   // Execute signature submission
@@ -375,8 +403,11 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
   const totalCount = doc.signatories.length;
   const progressPercent = Math.round((signedCount / (totalCount || 1)) * 100);
 
-  // Active file URL (final if completed, else original)
-  const activeFileUrl = doc.finalPdfUrl || doc.originalPdfUrl;
+  // Active file URL (cache-busted when finalPdfUrl updates after merge)
+  const rawActiveUrl = doc.finalPdfUrl || doc.originalPdfUrl;
+  const activeFileUrl = rawActiveUrl.startsWith('http')
+    ? `${rawActiveUrl}${rawActiveUrl.includes('?') ? '&' : '?'}v=${encodeURIComponent(doc.updatedAt || String(doc.signatures.length))}`
+    : rawActiveUrl;
 
   return (
     <div className="flex flex-col h-[calc(100vh-4rem)] bg-slate-100 overflow-hidden">
@@ -504,14 +535,16 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             </button>
           )}
 
-          {doc.status === 'completed' && (
+          {(doc.status === 'completed' || doc.signatures.length > 0) && (
             <a
               href={activeFileUrl}
-              download={`${doc.referenceNumber}_Final_Signed.pdf`}
+              download={`${doc.referenceNumber}_Signed.pdf`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="flex items-center space-x-1 px-2.5 sm:px-3.5 py-1.5 sm:py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition-colors shrink-0 whitespace-nowrap"
             >
               <Download className="w-3.5 h-3.5" />
-              <span>Download Final PDF</span>
+              <span>{doc.status === 'completed' ? 'Download Final PDF' : 'Download Merged PDF'}</span>
             </a>
           )}
         </div>
@@ -912,17 +945,30 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
             {/* Body */}
             <div className="p-6 space-y-4">
               <div>
-                <div className="flex items-center justify-between mb-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
                   <label className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                     Your Transparent Signature PNG
                   </label>
-                  <button
-                    onClick={() => setIsStudioOpen(true)}
-                    className="text-xs text-blue-900 font-semibold hover:underline flex items-center gap-1"
-                  >
-                    <PenTool className="w-3 h-3" />
-                    <span>Change / Redraw Signature</span>
-                  </button>
+                  <div className="flex items-center space-x-3">
+                    <label className="text-xs text-emerald-700 font-semibold hover:underline flex items-center gap-1 cursor-pointer">
+                      <Upload className="w-3 h-3" />
+                      <span>Upload PNG/JPG/WEBP</span>
+                      <input
+                        type="file"
+                        accept="image/png,image/jpeg,image/webp"
+                        onChange={handleDirectSignatureImageUpload}
+                        className="hidden"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsStudioOpen(true)}
+                      className="text-xs text-blue-900 font-semibold hover:underline flex items-center gap-1"
+                    >
+                      <PenTool className="w-3 h-3" />
+                      <span>Draw / Studio</span>
+                    </button>
+                  </div>
                 </div>
 
                 {/* Signature Preview Box */}
@@ -936,26 +982,46 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     backgroundColor: '#ffffff',
                   }}
                 >
-                  {signatureDataUrl || user?.signaturePngUrl ? (
+                  {processingSigImage ? (
+                    <span className="text-xs text-blue-900 font-semibold">
+                      Removing background &amp; converting to transparent PNG...
+                    </span>
+                  ) : signatureDataUrl || user?.signaturePngUrl ? (
                     <img
                       src={signatureDataUrl || user?.signaturePngUrl}
                       alt="Signature"
                       className="max-h-full max-w-full object-contain filter drop-shadow-xs"
                     />
                   ) : (
-                    <div className="text-center">
-                      <p className="text-xs text-slate-400 italic mb-2">
-                        No signature image found for your account
+                    <div className="text-center space-y-2">
+                      <p className="text-xs text-slate-500 italic">
+                        Upload a signature image (PNG, JPG, WEBP) or draw in Signature Studio
                       </p>
-                      <button
-                        onClick={() => setIsStudioOpen(true)}
-                        className="px-3 py-1 bg-blue-900 text-white rounded text-xs font-semibold"
-                      >
-                        Create Signature
-                      </button>
+                      <div className="flex items-center justify-center space-x-2">
+                        <label className="px-3 py-1 bg-emerald-700 hover:bg-emerald-800 text-white rounded text-xs font-semibold cursor-pointer inline-flex items-center gap-1">
+                          <Upload className="w-3 h-3" />
+                          <span>Upload Image</span>
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={handleDirectSignatureImageUpload}
+                            className="hidden"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsStudioOpen(true)}
+                          className="px-3 py-1 bg-blue-900 hover:bg-blue-950 text-white rounded text-xs font-semibold"
+                        >
+                          Draw Signature
+                        </button>
+                      </div>
                     </div>
                   )}
                 </div>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  White paper backgrounds are automatically stripped to transparent PNG and merged onto the PDF.
+                </p>
               </div>
 
               {/* Signatory Details Grid */}

@@ -160,7 +160,7 @@ export const DocumentsListView: React.FC<DocumentsListViewProps> = ({
           {filteredDocs.map((doc) => {
             const signedCount = doc.signatories.filter((s) => s.status === 'signed').length;
             const totalCount = doc.signatories.length;
-            const progressPercent = Math.round((signedCount / totalCount) * 100);
+            const progressPercent = totalCount > 0 ? Math.round((signedCount / totalCount) * 100) : (doc.signatures.length > 0 ? 100 : 0);
 
             return (
               <div
@@ -236,10 +236,12 @@ export const DocumentsListView: React.FC<DocumentsListViewProps> = ({
                   </div>
 
                   <div className="flex items-center space-x-2">
-                    {doc.status === 'completed' && (
+                    {(doc.status === 'completed' || doc.signatures.length > 0) && (
                       <a
-                        href={doc.finalPdfUrl || doc.originalPdfUrl}
-                        download={`${doc.referenceNumber}_Final.pdf`}
+                        href={`${doc.finalPdfUrl || doc.originalPdfUrl}${(doc.finalPdfUrl || doc.originalPdfUrl).includes('?') ? '&' : '?'}v=${encodeURIComponent(doc.updatedAt || '1')}`}
+                        download={`${doc.referenceNumber}_Signed.pdf`}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         onClick={(e) => e.stopPropagation()}
                         className="px-3.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg text-xs font-bold border border-emerald-200 flex items-center space-x-1 transition-colors"
                       >

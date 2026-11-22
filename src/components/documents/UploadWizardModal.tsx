@@ -202,10 +202,6 @@ export const UploadWizardModal: React.FC<UploadWizardModalProps> = ({
   };
 
   const handleProceedToStep3 = () => {
-    if (selectedSignatories.length === 0) {
-      setError('Please select at least one signatory to review and sign this document.');
-      return;
-    }
     setError(null);
     setStep(3);
   };

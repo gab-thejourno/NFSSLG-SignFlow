@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Lock, Mail, User as UserIcon, Building, Briefcase, Check, AlertCircle } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { supabase } from '../../lib/supabaseClient';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -11,7 +12,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   const { login, register } = useAuth();
   const [mode, setMode] = useState<'login' | 'register' | 'forgot'>('login');
 
-  // Form states
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [fullName, setFullName] = useState('');
@@ -33,24 +33,28 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
 
     try {
       if (mode === 'login') {
-        await login(email, password);
+        await login(email.trim(), password);
         onClose();
       } else if (mode === 'register') {
         const res = await register({
           fullName,
-          email,
+          email: email.trim(),
           password,
           department,
           position,
         });
-        if (res.requiresApproval) {
+        if (!res.sessionActive) {
           setSuccessMsg(res.message);
         } else {
           onClose();
         }
       } else {
-        // Forgot password simulation
-        setSuccessMsg('A password reset dispatch has been logged for this account.');
+        if (!supabase) {
+          throw new Error('Supabase is not configured.');
+        }
+        const { error: resetErr } = await supabase.auth.resetPasswordForEmail(email.trim());
+        if (resetErr) throw new Error(resetErr.message);
+        setSuccessMsg('Password reset instructions have been sent to your email address.');
       }
     } catch (err: any) {
       setError(err.message || 'Operation failed');
@@ -65,17 +69,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50/70">
           <h3 className="text-base font-bold text-slate-900">
             {mode === 'login'
-              ? 'Institutional Account Login'
+              ? 'Account Sign In'
               : mode === 'register'
-              ? 'Register SignFlow Account'
-              : 'Password Reset'}
+              ? 'Create SignFlow Account'
+              : 'Reset Password'}
           </h3>
           <button onClick={onClose} className="p-1 text-slate-400 hover:text-slate-600">
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        <form action="#" onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form action="#" onSubmit={handleSubmit} noValidate className="p-6 space-y-4">
           {error && (
             <div className="p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center space-x-2">
               <AlertCircle className="w-4 h-4 shrink-0" />
@@ -103,7 +107,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     required
                     value={fullName}
                     onChange={(e) => setFullName(e.target.value)}
-                    placeholder="e.g. Jessica Hayes"
+                    placeholder="e.g. Juan Dela Cruz"
                     className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-900 focus:outline-none"
                   />
                 </div>
@@ -118,10 +122,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     <Building className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                     <input
                       type="text"
-                      required
                       value={department}
                       onChange={(e) => setDepartment(e.target.value)}
-                      placeholder="e.g. Finance"
+                      placeholder="e.g. NCR"
                       className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-900 focus:outline-none"
                     />
                   </div>
@@ -135,7 +138,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     <Briefcase className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
                     <input
                       type="text"
-                      required
                       value={position}
                       onChange={(e) => setPosition(e.target.value)}
                       placeholder="e.g. Director"
@@ -156,7 +158,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="name@signflow.org"
+                placeholder="name@example.com"
                 className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-xs focus:ring-2 focus:ring-blue-900 focus:outline-none"
               />
             </div>
@@ -181,6 +183,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 <input
                   type="password"
                   required
+                  minLength={6}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
@@ -188,13 +191,6 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 />
               </div>
             </div>
-          )}
-
-          {mode === 'register' && (
-            <p className="text-[11px] text-slate-500 italic">
-              Note: New registrations require administrator review and approval before signing access
-              is granted.
-            </p>
           )}
 
           <button
@@ -205,10 +201,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             {loading
               ? 'Processing...'
               : mode === 'login'
-              ? 'Sign In to Account'
+              ? 'Sign In'
               : mode === 'register'
-              ? 'Submit Account Registration'
-              : 'Send Reset Link'}
+              ? 'Create Account'
+              : 'Send Reset Email'}
           </button>
 
           <div className="text-center pt-2 border-t border-slate-100 text-xs text-slate-600">
@@ -220,7 +216,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   onClick={() => setMode('register')}
                   className="text-blue-900 font-bold hover:underline"
                 >
-                  Register here
+                  Create account
                 </button>
               </span>
             ) : (
