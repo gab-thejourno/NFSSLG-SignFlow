@@ -662,15 +662,57 @@ export const supabaseApi = {
       password,
     });
 
+    if (!error && data.user && data.session) {
+      const user = await fetchOrSyncProfile(data.user);
+      return { user, token: data.session.access_token };
+    }
+
+    // If signInWithPassword failed ONLY for one of the 19 pre-authorized NFSSLG accounts using the default password,
+    // initialize that pre-authorized account via Supabase Auth if not yet seeded in SQL.
+    const preset = NFSSLG_ACCOUNT_MAP[resolvedEmail];
+    if (preset && password === 'adminpassword') {
+      const { data: provisionData, error: provisionErr } = await client.auth.signUp({
+        email: resolvedEmail,
+        password: 'adminpassword',
+        options: {
+          data: {
+            full_name: preset.fullName,
+            username: preset.username,
+            department: preset.department,
+            position: preset.position,
+            role: preset.role,
+            status: 'active',
+          },
+        },
+      });
+
+      if (!provisionErr && provisionData.user && provisionData.session) {
+        const user = await fetchOrSyncProfile(provisionData.user);
+        return { user, token: provisionData.session.access_token };
+      }
+
+      const provMsg = (provisionErr?.message || '').toLowerCase();
+      if (!provisionErr && provisionData.user && !provisionData.session) {
+        throw new Error(
+          'Account requires email confirmation in Supabase. Run supabase/schema.sql (Section 5) in your Supabase SQL Editor to auto-confirm all 19 NFSSLG accounts.'
+        );
+      }
+      if (provMsg.includes('signups not allowed') || provMsg.includes('not allowed')) {
+        throw new Error(
+          'NFSSLG accounts have not been seeded in Supabase yet. Run supabase/schema.sql (Section 5) in your Supabase SQL Editor.'
+        );
+      }
+      if (provMsg.includes('already registered')) {
+        throw new Error(
+          'Invalid password, or this Supabase account was seeded without email confirmation/tokens. Re-run supabase/schema.sql (Section 5) in your Supabase SQL Editor.'
+        );
+      }
+    }
+
     if (error) {
       throw new Error(error.message);
     }
-    if (!data.user || !data.session) {
-      throw new Error('Authentication failed. Please check your username and password.');
-    }
-
-    const user = await fetchOrSyncProfile(data.user);
-    return { user, token: data.session.access_token };
+    throw new Error('Authentication failed. Please check your username and password.');
   },
 
   async logout(): Promise<void> {

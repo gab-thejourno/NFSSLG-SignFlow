@@ -755,6 +755,29 @@ function loadStaticDb(): StaticDbSchema {
     if (raw) {
       const parsed = JSON.parse(raw) as StaticDbSchema;
       if (parsed && Array.isArray(parsed.users) && parsed.users.length > 0) {
+        const baseline = buildInitialStaticDb();
+        let mutated = false;
+        for (const baseUser of baseline.users) {
+          const existing = parsed.users.find(
+            (u) => u.id === baseUser.id || u.email.toLowerCase() === baseUser.email.toLowerCase()
+          );
+          if (!existing) {
+            parsed.users.push(baseUser);
+            mutated = true;
+          } else {
+            if (existing.username !== baseUser.username) {
+              existing.username = baseUser.username;
+              mutated = true;
+            }
+            if (!existing.password) {
+              existing.password = baseUser.password;
+              mutated = true;
+            }
+          }
+        }
+        if (mutated) {
+          saveStaticDb(parsed);
+        }
         return parsed;
       }
     }

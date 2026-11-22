@@ -193,14 +193,17 @@ create policy "Authenticated update access for signatures"
   to authenticated
   using (bucket_id = 'signatures');
 
--- 5. Seed the 19 Pre-Authorized NFSSLG Accounts (Default Password: adminpassword)
+-- 5. Seed / Repair the 19 Pre-Authorized NFSSLG Accounts (Default Password: adminpassword)
 -- Tip: In Supabase Dashboard -> Authentication -> Providers -> Email, turn OFF "Allow new users to sign up"
 -- so only you (via Supabase Dashboard/SQL) can create or manage accounts.
 do $$
 declare
   acct record;
   new_uid uuid;
+  existing_uid uuid;
 begin
+  perform set_config('search_path', 'public, auth, extensions', true);
+
   for acct in
     select * from (values
       ('centraloffice@signflow.gov.ph', 'nfsslg-yfd', 'Central Office - Youth Formation Division (YFD)', 'National Federation of SSLG Central Office (YFD)', 'Central Office Administrator', 'admin'),
@@ -224,18 +227,24 @@ begin
       ('region13@signflow.gov.ph', 'nfsslg-r13', 'RFSSLG President - Region 13 (Caraga Administrative Region)', 'Regional Federation of SSLG - Region 13 (Caraga Administrative Region)', 'RFSSLG President', 'user')
     ) as t(email, username, full_name, department, position, role)
   loop
-    if not exists (select 1 from auth.users where email = acct.email) then
+    select id into existing_uid from auth.users where email = acct.email limit 1;
+
+    if existing_uid is null then
       new_uid := gen_random_uuid();
       insert into auth.users (
         instance_id, id, aud, role, email, encrypted_password, email_confirmed_at,
-        raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, recovery_token
+        recovery_sent_at, last_sign_in_at,
+        raw_app_meta_data, raw_user_meta_data, created_at, updated_at,
+        confirmation_token, recovery_token, email_change, email_change_token_new
       ) values (
         '00000000-0000-0000-0000-000000000000',
         new_uid,
         'authenticated',
         'authenticated',
         acct.email,
-        crypt('adminpassword', gen_salt('bf')),
+        crypt('adminpassword', gen_salt('bf', 10)),
+        now(),
+        now(),
         now(),
         '{"provider":"email","providers":["email"]}'::jsonb,
         jsonb_build_object(
@@ -249,6 +258,8 @@ begin
         now(),
         now(),
         '',
+        '',
+        '',
         ''
       );
 
@@ -257,7 +268,7 @@ begin
       ) values (
         gen_random_uuid(),
         new_uid,
-        jsonb_build_object('sub', new_uid::text, 'email', acct.email),
+        jsonb_build_object('sub', new_uid::text, 'email', acct.email, 'email_verified', true),
         'email',
         new_uid::text,
         now(),
@@ -265,15 +276,63 @@ begin
         now()
       );
 
-      update public.profiles
+      insert into public.profiles (id, email, full_name, username, department, position, role, status)
+      values (new_uid, acct.email, acct.full_name, acct.username, acct.department, acct.position, acct.role, 'active')
+      on conflict (id) do update
       set username = acct.username,
           full_name = acct.full_name,
           department = acct.department,
           position = acct.position,
           role = acct.role,
-          status = 'active'
-      where id = new_uid;
+          status = 'active';
+    else
+      -- Repair missing GoTrue string defaults or unconfirmed state if inserted earlier
+      update auth.users
+      set email_confirmed_at = coalesce(email_confirmed_at, now()),
+          confirmation_token = coalesce(confirmation_token, ''),
+          recovery_token = coalesce(recovery_token, ''),
+          email_change = coalesce(email_change, ''),
+          email_change_token_new = coalesce(email_change_token_new, ''),
+          raw_app_meta_data = '{"provider":"email","providers":["email"]}'::jsonb,
+          raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object(
+            'full_name', acct.full_name,
+            'username', acct.username,
+            'department', acct.department,
+            'position', acct.position,
+            'role', acct.role,
+            'status', 'active'
+          )
+      where id = existing_uid;
+
+      if not exists (select 1 from auth.identities where user_id = existing_uid and provider = 'email') then
+        insert into auth.identities (
+          id, user_id, identity_data, provider, provider_id, last_sign_in_at, created_at, updated_at
+        ) values (
+          gen_random_uuid(),
+          existing_uid,
+          jsonb_build_object('sub', existing_uid::text, 'email', acct.email, 'email_verified', true),
+          'email',
+          existing_uid::text,
+          now(),
+          now(),
+          now()
+        );
+      end if;
+
+      insert into public.profiles (id, email, full_name, username, department, position, role, status)
+      values (existing_uid, acct.email, acct.full_name, acct.username, acct.department, acct.position, acct.role, 'active')
+      on conflict (id) do update
+      set username = acct.username,
+          full_name = acct.full_name,
+          department = acct.department,
+          position = acct.position,
+          role = acct.role,
+          status = 'active';
     end if;
   end loop;
 end $$;
+
+-- Optional: Run the line below ONLY if you ever want to reset all 19 NFSSLG passwords back to 'adminpassword':
+-- update auth.users set encrypted_password = extensions.crypt('adminpassword', extensions.gen_salt('bf', 10)) where email like '%@signflow.gov.ph';
+
 
