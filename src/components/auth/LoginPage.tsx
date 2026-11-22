@@ -104,8 +104,8 @@ export const LoginPage: React.FC = () => {
               </h2>
               <p className="text-xs text-slate-300 leading-relaxed">
                 Upload PDFs, apply transparent PNG digital signatures with automatic background
-                removal, and generate cryptographically merged final PDFs backed by Supabase Auth,
-                Postgres, and Storage.
+                removal, and generate cryptographically merged final PDFs with persistent cloud
+                storage.
               </p>
             </div>
           </div>
@@ -113,7 +113,7 @@ export const LoginPage: React.FC = () => {
           <div className="mt-8 pt-6 border-t border-slate-800 space-y-2 text-xs text-slate-400">
             <div className="flex items-center space-x-2 text-emerald-400 font-semibold text-[11px]">
               <Shield className="w-4 h-4" />
-              <span>Supabase Auth &amp; Persistent Cloud Storage</span>
+              <span>Encrypted Authentication &amp; Cloud Document Storage</span>
             </div>
             <p className="text-[11px] leading-relaxed text-slate-400">
               Sign in with your verified email and password or register a new signatory account to
@@ -168,7 +168,7 @@ export const LoginPage: React.FC = () => {
               </h3>
               <p className="text-xs text-slate-500 mt-1">
                 {mode === 'signin'
-                  ? 'Sign in with your Supabase email and password to manage and sign PDFs.'
+                  ? 'Sign in with your email and password to manage and sign PDFs.'
                   : 'Register with your email and password to begin uploading and signing documents.'}
               </p>
             </div>
@@ -317,7 +317,7 @@ export const LoginPage: React.FC = () => {
           </div>
 
           <div className="mt-6 text-center text-[11px] text-slate-400 border-t border-slate-100 pt-3">
-            NFSSLG SignFlow • Powered by Supabase Auth &amp; pdf-lib
+            NFSSLG SignFlow • National Document Approval &amp; Electronic Signature Platform
           </div>
         </div>
       </div>
