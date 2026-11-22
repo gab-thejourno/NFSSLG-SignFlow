@@ -97,13 +97,17 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
 
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const pdfDocRef = useRef<any>(null);
+  const loadedPdfUrlRef = useRef<string | null>(null);
   const renderTaskRef = useRef<any>(null);
   const [pdfLoading, setPdfLoading] = useState(true);
+  const [pdfRenderError, setPdfRenderError] = useState<string | null>(null);
 
-  // Fetch document details
-  const fetchDoc = async () => {
+  // Fetch document details (silent = true avoids unmounting the PDF canvas during live updates)
+  const fetchDoc = async (silent = false) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       setError(null);
       const res = await apiGetDocument(documentId);
       setDoc(res.document);
@@ -122,55 +126,144 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
         });
       }
     } catch (err: any) {
-      setError(err.message || 'Failed to load document');
+      if (!silent) {
+        setError(err.message || 'Failed to load document');
+      }
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchDoc();
+    loadedPdfUrlRef.current = null;
+    pdfDocRef.current = null;
+    fetchDoc(false);
   }, [documentId]);
 
-  // Real-time synchronization
+  // Real-time synchronization (never unmount canvas on background updates)
   useEffect(() => {
     const unsub = subscribeToRealtime(user?.id, (event) => {
       if (
         event.type === 'SIGNATURE_ADDED' &&
-        event.payload.documentId === documentId
+        event.payload?.documentId === documentId
       ) {
-        setDoc(event.payload.document);
+        if (event.payload.document) {
+          setDoc(event.payload.document);
+        } else {
+          fetchDoc(true);
+        }
         if (event.payload.completed) {
           triggerCelebration();
         }
       } else if (
-        (event.type === 'FIELDS_UPDATED' || event.type === 'DOCUMENT_UPDATED') &&
-        (event.payload.documentId === documentId || event.payload.document?.id === documentId)
+        event.type === 'FIELDS_UPDATED' &&
+        (event.payload?.documentId === documentId || event.payload?.document?.id === documentId)
       ) {
-        fetchDoc();
+        if (event.payload?.document) {
+          setDoc(event.payload.document);
+        } else {
+          fetchDoc(true);
+        }
+      } else if (
+        event.type === 'DOCUMENT_UPDATED' &&
+        (event.payload?.documentId === documentId ||
+          event.payload?.document?.id === documentId ||
+          event.payload?.new?.id === documentId ||
+          event.payload?.old?.id === documentId)
+      ) {
+        fetchDoc(true);
       }
     });
 
     return unsub;
   }, [documentId, user?.id]);
 
-  // Load and render PDF using pdfjs safely
+  const renderPage = async (pageNumber: number, pdfInstance?: any) => {
+    const pdf = pdfInstance || pdfDocRef.current;
+    const canvas = canvasRef.current;
+    if (!pdf || !canvas) return;
+
+    try {
+      if (renderTaskRef.current) {
+        try {
+          renderTaskRef.current.cancel();
+        } catch {}
+        renderTaskRef.current = null;
+      }
+
+      setPdfLoading(true);
+      setPdfRenderError(null);
+      const safePage = Math.max(1, Math.min(pageNumber, pdf.numPages || pageNumber));
+      const page = await pdf.getPage(safePage);
+      const scale = zoomScale * 1.5;
+      const viewport = page.getViewport({ scale });
+
+      // Ensure canvas is still mounted before drawing
+      if (!canvasRef.current) return;
+      const ctx = canvasRef.current.getContext('2d');
+      if (!ctx) return;
+
+      canvasRef.current.width = viewport.width;
+      canvasRef.current.height = viewport.height;
+
+      const task = page.render({
+        canvasContext: ctx,
+        viewport,
+      });
+      renderTaskRef.current = task;
+      await task.promise;
+      if (renderTaskRef.current === task) {
+        renderTaskRef.current = null;
+      }
+      setPdfLoading(false);
+    } catch (e: any) {
+      if (e?.name !== 'RenderingCancelledException') {
+        console.warn('Canvas render notice:', e);
+        setPdfLoading(false);
+      }
+    }
+  };
+
+  // Load PDF document once per unique originalPdfUrl (with ArrayBuffer fallback)
   useEffect(() => {
-    if (!doc?.originalPdfUrl) return;
+    const pdfUrl = doc?.originalPdfUrl;
+    if (!pdfUrl) return;
+
+    if (loadedPdfUrlRef.current === pdfUrl && pdfDocRef.current) {
+      return;
+    }
 
     let isCancelled = false;
     const loadPdf = async () => {
       try {
         setPdfLoading(true);
-        const loadingTask = pdfjsLib.getDocument({ url: doc.originalPdfUrl });
-        const pdf = await loadingTask.promise;
+        setPdfRenderError(null);
+
+        let pdf: any;
+        try {
+          const loadingTask = pdfjsLib.getDocument({ url: pdfUrl });
+          pdf = await loadingTask.promise;
+        } catch (primaryErr) {
+          // Fallback: fetch raw bytes directly in case CDN range requests fail
+          const res = await fetch(pdfUrl, { cache: 'no-store' });
+          if (!res.ok) throw primaryErr;
+          const bytes = await res.arrayBuffer();
+          pdf = await pdfjsLib.getDocument({ data: bytes }).promise;
+        }
+
         if (isCancelled) return;
         pdfDocRef.current = pdf;
+        loadedPdfUrlRef.current = pdfUrl;
         setTotalPages(pdf.numPages);
-        renderPage(currentPage, pdf);
-      } catch (err) {
-        console.warn('PDF.js document loading notice:', err);
-        setPdfLoading(false);
+        await renderPage(currentPage, pdf);
+      } catch (err: any) {
+        if (!isCancelled) {
+          console.warn('PDF.js document loading notice:', err);
+          setPdfRenderError(err?.message || 'Could not render PDF on interactive canvas.');
+          setPdfLoading(false);
+        }
       }
     };
 
@@ -186,52 +279,12 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
     };
   }, [doc?.originalPdfUrl]);
 
-  const renderPage = async (pageNumber: number, pdfInstance?: any) => {
-    const pdf = pdfInstance || pdfDocRef.current;
-    if (!pdf || !canvasRef.current) return;
-
-    try {
-      if (renderTaskRef.current) {
-        try {
-          renderTaskRef.current.cancel();
-        } catch {}
-        renderTaskRef.current = null;
-      }
-
-      setPdfLoading(true);
-      const page = await pdf.getPage(pageNumber);
-      const scale = zoomScale * 1.5;
-      const viewport = page.getViewport({ scale });
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
-
-      const renderContext = {
-        canvasContext: ctx,
-        viewport,
-      };
-
-      const task = page.render(renderContext);
-      renderTaskRef.current = task;
-      await task.promise;
-      setPdfLoading(false);
-    } catch (e: any) {
-      if (e?.name !== 'RenderingCancelledException') {
-        console.warn('Canvas render notice:', e);
-      }
-      setPdfLoading(false);
-    }
-  };
-
+  // Re-render page whenever page, zoom, viewMode, or initial loading state makes the canvas active
   useEffect(() => {
-    if (pdfDocRef.current) {
+    if (!loading && pdfDocRef.current && (viewMode === 'interactive' || viewMode === 'split')) {
       renderPage(currentPage);
     }
-  }, [currentPage, zoomScale]);
+  }, [currentPage, zoomScale, viewMode, loading]);
 
   const triggerCelebration = () => {
     confetti({
@@ -363,6 +416,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
       setDoc(res.document);
       setSigningField(null);
       setIsPlacingSignHere(false);
+      setCustomSignPosition(null);
 
       if (res.completed) {
         triggerCelebration();
@@ -774,7 +828,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                   }`}
                   style={{
                     width: `${595 * zoomScale}px`,
-                    minHeight: `${842 * zoomScale}px`,
+                    minHeight: pdfLoading && !pdfDocRef.current ? `${842 * zoomScale}px` : undefined,
                   }}
                 >
                   {/* The Actual Rendered PDF Canvas */}
@@ -791,38 +845,62 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                     </div>
                   )}
 
+                  {/* Fallback Notice if interactive canvas couldn't decode PDF */}
+                  {!pdfLoading && pdfRenderError && (
+                    <div className="p-8 text-center space-y-3 bg-slate-50 border-t border-slate-200">
+                      <AlertCircle className="w-8 h-8 text-amber-600 mx-auto" />
+                      <p className="text-xs text-slate-700 font-semibold">
+                        Interactive sheet preview could not render this PDF directly.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => setViewMode('native')}
+                        className="px-4 py-2 bg-blue-900 hover:bg-blue-950 text-white rounded-lg text-xs font-bold"
+                      >
+                        Switch to Native PDF View
+                      </button>
+                    </div>
+                  )}
+
                   {/* Confirmed Signatures Overlay */}
                   {doc.signatures
                     .filter((sig) => sig.pageNumber === currentPage)
-                    .map((sig) => (
-                      <div
-                        key={sig.id}
-                        className="absolute border border-emerald-500 bg-white/95 rounded-lg p-2 flex flex-col justify-between group pointer-events-auto shadow-md"
-                        style={{
-                          left: `${sig.xPercent}%`,
-                          top: `${sig.yPercent}%`,
-                          width: `${sig.widthPercent}%`,
-                          height: `${sig.heightPercent}%`,
-                        }}
-                      >
-                        <img
-                          src={sig.signaturePngData}
-                          alt={sig.userName}
-                          className="w-full h-full object-contain filter drop-shadow-xs"
-                        />
-                        <div className="absolute -bottom-6 left-0 bg-emerald-950 text-white border border-emerald-500 px-2 py-0.5 rounded text-[9px] font-mono shadow-md whitespace-nowrap flex items-center space-x-1 z-10">
-                          <ShieldCheck className="w-3 h-3 text-emerald-400" />
-                          <span>{sig.userName} • Signed &amp; Locked</span>
+                    .map((sig) => {
+                      const rawSigUrl = sig.signaturePngData || '';
+                      const sigImgSrc = rawSigUrl.startsWith('http')
+                        ? `${rawSigUrl}${rawSigUrl.includes('?') ? '&' : '?'}t=${encodeURIComponent(sig.signedAt || sig.id)}`
+                        : rawSigUrl;
+
+                      return (
+                        <div
+                          key={sig.id}
+                          className="absolute border border-emerald-500/80 bg-emerald-50/15 rounded-lg p-1 flex flex-col justify-between group pointer-events-auto shadow-xs z-20"
+                          style={{
+                            left: `${sig.xPercent}%`,
+                            top: `${sig.yPercent}%`,
+                            width: `${sig.widthPercent}%`,
+                            height: `${sig.heightPercent}%`,
+                          }}
+                        >
+                          <img
+                            src={sigImgSrc}
+                            alt={sig.userName}
+                            className="w-full h-full object-contain filter drop-shadow-xs"
+                          />
+                          <div className="absolute -bottom-6 left-0 bg-emerald-950 text-white border border-emerald-500 px-2 py-0.5 rounded text-[9px] font-mono shadow-md whitespace-nowrap flex items-center space-x-1 z-20">
+                            <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                            <span>{sig.userName} • Signed &amp; Locked</span>
+                          </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
 
                   {/* User's Chosen Signature Placement Marker (Determined completely by signee!) */}
                   {customSignPosition &&
                     customSignPosition.pageNumber === currentPage &&
                     hasMyTurnToSign && (
                       <div
-                        className="absolute rounded-xl p-2.5 flex flex-col justify-between border-2 border-dashed border-blue-900 bg-blue-50/95 shadow-xl ring-4 ring-blue-500/30 z-30 pointer-events-auto"
+                        className="absolute rounded-xl p-2.5 flex flex-col justify-between border-2 border-dashed border-blue-900 bg-blue-50/90 shadow-xl ring-4 ring-blue-500/30 z-30 pointer-events-auto"
                         style={{
                           left: `${customSignPosition.xPercent}%`,
                           top: `${customSignPosition.yPercent}%`,
@@ -906,6 +984,7 @@ export const DocumentViewer: React.FC<DocumentViewerProps> = ({
                 </a>
               </div>
               <iframe
+                key={activeFileUrl}
                 src={`${activeFileUrl}#toolbar=1&navpanes=1`}
                 className="w-full flex-1 border-0 bg-white"
                 title="Document PDF Preview"
