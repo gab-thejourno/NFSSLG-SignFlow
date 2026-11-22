@@ -1,0 +1,6 @@
+{
+  "name": "SignFlow - Organization Document Approval & Digital Signature System",
+  "description": "Enterprise-grade multi-signatory document approval and digital signature workflow platform with real-time tracking, PDF embedding, and audit trail.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
